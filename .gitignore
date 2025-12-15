@@ -1,0 +1,19 @@
+# Binary
+pebblify
+
+# Go workspace
+go.work
+go.work.sum
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Pebblify runtime
+.pebblify-tmp/
+pebblify.lock
+state.json
