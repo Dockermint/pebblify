@@ -1,7 +1,7 @@
 # ==============================================================================
 # BUILD STAGE
 # ==============================================================================
-FROM --platform=$BUILDPLATFORM golang:1.23-alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:1.25.4-alpine3.22 AS builder
 
 ARG TARGETOS
 ARG TARGETARCH
@@ -26,7 +26,7 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build \
 # ==============================================================================
 # PRODUCTION STAGE
 # ==============================================================================
-FROM alpine:3.21
+FROM alpine:3.22
 
 ARG VERSION=dev
 ARG REVISION=unknown
