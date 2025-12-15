@@ -6,7 +6,7 @@ BINARY      := pebblify
 IMAGE       := dockermint/pebblify
 
 # Git metadata
-VERSION     := $(shell git describe --tags --always --dirty 2>/dev/null || git rev-parse --abbrev-ref HEAD)
+VERSION     := $(shell git rev-parse --abbrev-ref HEAD 2>/dev/null | grep -v '^HEAD$$' || git describe --tags --always --dirty 2>/dev/null || echo "dev")
 REVISION    := $(shell git rev-parse HEAD 2>/dev/null || echo "unknown")
 CREATED     := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 
