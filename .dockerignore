@@ -1,0 +1,34 @@
+# Git
+.git/
+.gitignore
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Build artifacts
+pebblify
+
+# Docker
+Dockerfile*
+docker-compose*.yml
+.docker/
+.dockerignore
+
+# Documentation
+*.md
+LICENSE
+
+# Test & debug
+*_test.go
+.pebblify-tmp/
+testdata/
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+.travis.yml
+Makefile
