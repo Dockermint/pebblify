@@ -9,6 +9,9 @@
 
 PebbleDB offers significant performance improvements over LevelDB, including better write throughput, more efficient compaction, and reduced storage overhead. Pebblify makes it easy to migrate your existing node data without manual intervention.
 
+> [!WARNING]
+> This tool is still in the early stages of development and may contain bugs or be unstable. If you notice any unusual behavior, please open an issue.
+
 ## Features
 
 - **Fast parallel conversion** — Process multiple databases concurrently with configurable worker count
