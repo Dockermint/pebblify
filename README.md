@@ -2,6 +2,8 @@
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go&logoColor=white)](https://go.dev/)
+![Benchmark](https://img.shields.io/badge/benchmark-216M_keys_in_4m9s-brightgreen)
+![Throughput](https://img.shields.io/badge/throughput-866k_keys%2Fs-blue)
 
 **Pebblify** is a high-performance migration tool that converts LevelDB databases to PebbleDB format, specifically designed for Cosmos SDK and CometBFT (formerly Tendermint) blockchain nodes.
 
@@ -192,6 +194,74 @@ make install            # Build and install to PATH
 make clean              # Remove build artifacts
 make info               # Show build information
 ```
+## Benchmark
+
+### Real-world Conversion Benchmark
+
+The following benchmark was performed on a production Cosmos node dataset to measure end-to-end LevelDB → PebbleDB conversion performance:
+
+```bash
+============================================================
+CONVERSION METRICS SUMMARY
+============================================================
+
+Global Statistics:
+  Total duration:      4m9s
+  Total keys:          216404586
+  Total data read:     39.00 GiB
+  Total data written:  39.00 GiB
+  Avg throughput:      866154 keys/sec, 159.83 MB/sec
+  Write/Read ratio:    100.0%
+
+Per-Database Statistics:
+
+  blockstore.db:
+    Keys:        57
+    Duration:    0s
+    Throughput:  1835 keys/sec, 20.68 MB/sec
+    Avg sizes:   key=1182 B, value=10638 B
+
+  tx_index.db:
+    Keys:        14655
+    Duration:    0s
+    Throughput:  673383 keys/sec, 51.10 MB/sec
+    Avg sizes:   key=8 B, value=72 B
+
+  application.db:
+    Keys:        216382918
+    Duration:    4m8s
+    Throughput:  871172 keys/sec, 159.83 MB/sec
+    Avg sizes:   key=19 B, value=173 B
+
+  state.db:
+    Keys:        6956
+    Duration:    0s
+    Throughput:  12969 keys/sec, 432.40 MB/sec
+    Avg sizes:   key=3496 B, value=31465 B
+============================================================
+
+Conversion completed successfully.
+New Pebble-backed data directory: pebbledb/data
+
+This run duration:   4m9s
+Total elapsed time:  5m7s (since first start)
+
+Size summary:
+  Source (LevelDB) data:  23.04 GiB (24743642329 bytes)
+  Target (PebbleDB) data: 23.91 GiB (25671213463 bytes)
+  Size ratio:             103.7 %
+```
+
+### Key Takeaways
+
+- ~216M keys migrated in 4 minutes
+- Sustained throughput of ~160 MB/s
+- Conversion speed dominated by application.db
+- PebbleDB size overhead: +3.7% (We are exploring ways to reduce the space used)
+- Zero data loss, 1:1 write/read parity
+
+> [!NOTE]
+> The benchmark was performed on a machine with an AMD Ryzen 9 8940HX CPU, 32 GiB of DDR5 RAM, and an NVMe disk using the Btrfs file system. The temporary folder was located on the NVMe disk, not in RAM.
 
 ## Performance Tips
 
