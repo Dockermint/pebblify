@@ -61,3 +61,31 @@ func (p *ProbeState) IsAlive() bool {
 	defer p.mu.RUnlock()
 	return time.Since(p.lastPing) < p.livenessGrace
 }
+
+type PingTicker struct {
+	stop chan struct{}
+}
+
+func NewPingTicker(state *ProbeState, interval time.Duration) *PingTicker {
+	pt := &PingTicker{stop: make(chan struct{})}
+
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				state.Ping()
+			case <-pt.stop:
+				return
+			}
+		}
+	}()
+
+	return pt
+}
+
+func (pt *PingTicker) Stop() {
+	close(pt.stop)
+}

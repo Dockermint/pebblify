@@ -214,7 +214,9 @@ func levelToPebbleCmd(args []string) {
 
 	probeState.SetStarted()
 	probeState.SetReady()
-	probeState.Ping()
+
+	ticker := health.NewPingTicker(probeState, 5*time.Second)
+	defer ticker.Stop()
 
 	cfg := &migration.RunConfig{
 		Workers:     *workers,
@@ -227,8 +229,6 @@ func levelToPebbleCmd(args []string) {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
-
-	probeState.Ping()
 }
 
 func recoverCmd(args []string) {
@@ -277,15 +277,15 @@ func recoverCmd(args []string) {
 
 	probeState.SetStarted()
 	probeState.SetReady()
-	probeState.Ping()
+
+	ticker := health.NewPingTicker(probeState, 5*time.Second)
+	defer ticker.Stop()
 
 	if err := migration.RunRecover(*workers, *batchMemory, tmpRoot, *verbose); err != nil {
 		probeState.SetNotReady()
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
-
-	probeState.Ping()
 }
 
 func verifyCmd(args []string) {
