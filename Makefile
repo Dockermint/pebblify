@@ -10,9 +10,9 @@ VERSION     := $(shell git rev-parse --abbrev-ref HEAD 2>/dev/null | grep -v '^H
 REVISION    := $(shell git rev-parse HEAD 2>/dev/null || echo "unknown")
 CREATED     := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 
-# Local platform detection
-LOCAL_OS    := $(shell go env GOOS)
-LOCAL_ARCH  := $(shell go env GOARCH)
+# Local platform detection (works without Go installed)
+LOCAL_OS    := $(shell go env GOOS 2>/dev/null || uname -s | tr A-Z a-z)
+LOCAL_ARCH  := $(shell go env GOARCH 2>/dev/null || uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
 
 # Build flags
 LDFLAGS     := -s -w -X main.Version=$(VERSION) -X main.Revision=$(REVISION)
