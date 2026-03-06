@@ -1,13 +1,17 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
+	"time"
 
 	"github.com/Dockermint/Pebblify/internal/fsutil"
+	"github.com/Dockermint/Pebblify/internal/health"
 	"github.com/Dockermint/Pebblify/internal/migration"
 	"github.com/Dockermint/Pebblify/internal/state"
 	"github.com/Dockermint/Pebblify/internal/verify"
@@ -85,6 +89,10 @@ Options for verify:
   --stop-on-error   Stop at first mismatch
   -v, --verbose     Show each key being verified
 
+Health probes (opt-in):
+  --health          Enable the HTTP health probe server
+  --health-port P   Port for the health server (default: 8086)
+
 Global flags:
   -h, --help        Show this help
   -V, --version     Show version and exit
@@ -99,7 +107,49 @@ Examples:
   # Verify the converted data
   pebblify verify ~/.gaia/data ./output/data
 
+  # Convert with health probes enabled
+  pebblify level-to-pebble --health --health-port 8086 ~/.gaia/data ./output
+
 `, Version)
+}
+
+type healthFlags struct {
+	enabled bool
+	port    int
+}
+
+func addHealthFlags(fs *flag.FlagSet) *healthFlags {
+	hf := &healthFlags{}
+	fs.BoolVar(&hf.enabled, "health", false, "enable HTTP health probe server")
+	fs.IntVar(&hf.port, "health-port", 8086, "port for the health server")
+	return hf
+}
+
+func startHealthServer(hf *healthFlags) (*health.Server, *health.ProbeState) {
+	probeState := health.NewProbeState(30 * time.Second)
+
+	if !hf.enabled {
+		return nil, probeState
+	}
+
+	srv := health.NewServer(hf.port, probeState)
+
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			fmt.Fprintf(os.Stderr, "health server error: %v\n", err)
+		}
+	}()
+
+	return srv, probeState
+}
+
+func stopHealthServer(srv *health.Server) {
+	if srv == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = srv.Shutdown(ctx)
 }
 
 func levelToPebbleCmd(args []string) {
@@ -112,6 +162,7 @@ func levelToPebbleCmd(args []string) {
 	tmpDir := fs.String("tmp-dir", "", "directory where .pebblify-tmp will be created (default: system temp)")
 	verbose := fs.Bool("verbose", false, "enable verbose output")
 	fs.BoolVar(verbose, "v", false, "alias for --verbose")
+	hf := addHealthFlags(fs)
 
 	if err := fs.Parse(args); err != nil {
 		os.Exit(1)
@@ -124,6 +175,9 @@ func levelToPebbleCmd(args []string) {
 		fs.PrintDefaults()
 		os.Exit(1)
 	}
+
+	srv, probeState := startHealthServer(hf)
+	defer stopHealthServer(srv)
 
 	src := rest[0]
 	out := rest[1]
@@ -158,6 +212,10 @@ func levelToPebbleCmd(args []string) {
 	}
 	defer unlock()
 
+	probeState.SetStarted()
+	probeState.SetReady()
+	probeState.Ping()
+
 	cfg := &migration.RunConfig{
 		Workers:     *workers,
 		BatchMemory: *batchMemory,
@@ -165,9 +223,12 @@ func levelToPebbleCmd(args []string) {
 	}
 
 	if err := migration.RunLevelToPebble(src, out, cfg, tmpRoot); err != nil {
+		probeState.SetNotReady()
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
+
+	probeState.Ping()
 }
 
 func recoverCmd(args []string) {
@@ -178,6 +239,7 @@ func recoverCmd(args []string) {
 	tmpDir := fs.String("tmp-dir", "", "directory containing .pebblify-tmp (must match conversion)")
 	verbose := fs.Bool("verbose", false, "enable verbose output")
 	fs.BoolVar(verbose, "v", false, "alias for --verbose")
+	hf := addHealthFlags(fs)
 
 	if err := fs.Parse(args); err != nil {
 		os.Exit(1)
@@ -188,6 +250,9 @@ func recoverCmd(args []string) {
 		fmt.Fprintf(os.Stderr, "Usage: pebblify recover [options]\n")
 		os.Exit(1)
 	}
+
+	srv, probeState := startHealthServer(hf)
+	defer stopHealthServer(srv)
 
 	baseTmpDir := os.TempDir()
 	if *tmpDir != "" {
@@ -210,10 +275,17 @@ func recoverCmd(args []string) {
 	}
 	defer unlock()
 
+	probeState.SetStarted()
+	probeState.SetReady()
+	probeState.Ping()
+
 	if err := migration.RunRecover(*workers, *batchMemory, tmpRoot, *verbose); err != nil {
+		probeState.SetNotReady()
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
+
+	probeState.Ping()
 }
 
 func verifyCmd(args []string) {
