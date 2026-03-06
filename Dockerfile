@@ -41,10 +41,15 @@ LABEL org.opencontainers.image.title="Pebblify" \
       org.opencontainers.image.vendor="Dockermint" \
       org.opencontainers.image.created="${CREATED}"
 
-RUN apk add --no-cache ca-certificates tzdata \
+RUN apk add --no-cache ca-certificates tzdata curl \
     && adduser -D -H -u 10000 -s /sbin/nologin appuser
 
 COPY --from=builder /build/pebblify /usr/local/bin/pebblify
+
+EXPOSE 8086
+
+HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8086/healthz/live || exit 1
 
 USER 10000:10000
 

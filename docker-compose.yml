@@ -1,0 +1,19 @@
+services:
+  pebblify:
+    build:
+      context: .
+      args:
+        VERSION: dev
+        REVISION: local
+    ports:
+      - "8086:8086"
+    volumes:
+      - ./testdata:/data
+    entrypoint: ["pebblify", "level-to-pebble", "--health", "--health-port", "8086"]
+    command: ["/data/source", "/data/output"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8086/healthz/live"]
+      interval: 10s
+      timeout: 3s
+      start_period: 5s
+      retries: 3
