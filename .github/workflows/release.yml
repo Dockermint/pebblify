@@ -92,6 +92,8 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
+          pattern: pebblify-*
+          merge-multiple: false
 
       - name: Prepare assets
         run: |
