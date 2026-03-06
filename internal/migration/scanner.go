@@ -70,7 +70,7 @@ func estimateDBKeys(path string, verbose bool) int64 {
 		fmt.Fprintf(os.Stderr, "warning: failed to open leveldb for key estimation %s: %v\n", path, err)
 		return 0
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	sizes, err := db.SizeOf([]util.Range{{Start: nil, Limit: nil}})
 	if err != nil || len(sizes) == 0 || sizes[0] == 0 {

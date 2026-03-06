@@ -56,13 +56,13 @@ func VerifyDB(srcPath, dstPath string, config *Config) (*Result, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to open source LevelDB %s: %w", srcPath, err)
 	}
-	defer srcDB.Close()
+	defer func() { _ = srcDB.Close() }()
 
 	dstDB, err := pebble.Open(dstPath, &pebble.Options{ReadOnly: true})
 	if err != nil {
 		return nil, fmt.Errorf("failed to open destination PebbleDB %s: %w", dstPath, err)
 	}
-	defer dstDB.Close()
+	defer func() { _ = dstDB.Close() }()
 
 	srcIt := srcDB.NewIterator(&util.Range{Start: nil, Limit: nil}, nil)
 	defer srcIt.Release()
@@ -115,14 +115,14 @@ func VerifyDB(srcPath, dstPath string, config *Config) (*Result, error) {
 				fmt.Printf("  [MISMATCH] %s\n", errMsg)
 			}
 			if config.StopOnError {
-				closer.Close()
+				_ = closer.Close()
 				break
 			}
 		} else {
 			result.MatchingKeys++
 		}
 
-		closer.Close()
+		_ = closer.Close()
 
 		if config.Verbose && result.VerifiedKeys%100_000 == 0 {
 			fmt.Printf("  [verify] %s: verified %d keys...\n", result.DBName, result.VerifiedKeys)
@@ -138,7 +138,7 @@ func VerifyDB(srcPath, dstPath string, config *Config) (*Result, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to create dest iterator: %w", err)
 		}
-		defer dstIt.Close()
+		defer func() { _ = dstIt.Close() }()
 
 		var dstKeyCount int64
 		for dstIt.First(); dstIt.Valid(); dstIt.Next() {
