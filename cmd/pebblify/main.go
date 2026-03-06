@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/Dockermint/Pebblify/internal/completion"
 	"github.com/Dockermint/Pebblify/internal/fsutil"
 	"github.com/Dockermint/Pebblify/internal/health"
 	"github.com/Dockermint/Pebblify/internal/migration"
@@ -42,6 +43,8 @@ func main() {
 		recoverCmd(os.Args[2:])
 	case "verify":
 		verifyCmd(os.Args[2:])
+	case "completion":
+		completionCmd(os.Args[2:])
 	case "-h", "--help", "help":
 		usage()
 	default:
@@ -68,6 +71,7 @@ Commands:
   level-to-pebble   Convert a Tendermint/CometBFT data/ directory from LevelDB to PebbleDB
   recover           Resume a previously interrupted conversion
   verify            Verify that converted data matches the source
+  completion        Generate or install shell completion scripts
   version           Show version information
 
 Options for level-to-pebble:
@@ -109,6 +113,12 @@ Examples:
 
   # Convert with health probes enabled
   pebblify level-to-pebble --health --health-port 8086 ~/.gaia/data ./output
+
+  # Generate bash completion script
+  pebblify completion bash
+
+  # Install zsh completion
+  pebblify completion install zsh
 
 `, Version)
 }
@@ -320,4 +330,66 @@ func verifyCmd(args []string) {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+func completionCmd(args []string) {
+	if len(args) == 0 {
+		completionUsage()
+		os.Exit(1)
+	}
+
+	switch args[0] {
+	case "bash":
+		fmt.Print(completion.GenerateBash())
+	case "zsh":
+		fmt.Print(completion.GenerateZsh())
+	case "install":
+		completionInstallCmd(args[1:])
+	default:
+		fmt.Fprintf(os.Stderr, "unknown shell: %s\n\n", args[0])
+		completionUsage()
+		os.Exit(1)
+	}
+}
+
+func completionInstallCmd(args []string) {
+	if len(args) == 0 {
+		fmt.Fprintf(os.Stderr, "missing shell argument\n\n")
+		completionUsage()
+		os.Exit(1)
+	}
+
+	var (
+		dest string
+		err  error
+		hint string
+	)
+
+	switch args[0] {
+	case "bash":
+		dest, err = completion.InstallBash()
+		hint = fmt.Sprintf("source %s", dest)
+	case "zsh":
+		dest, err = completion.InstallZsh()
+		hint = "autoload -Uz compinit && compinit"
+	default:
+		fmt.Fprintf(os.Stderr, "unknown shell: %s\n\n", args[0])
+		completionUsage()
+		os.Exit(1)
+	}
+
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Fprintf(os.Stderr, "completion installed to %s\n", dest)
+	fmt.Fprintf(os.Stderr, "reload with: %s\n", hint)
+}
+
+func completionUsage() {
+	fmt.Fprintf(os.Stderr, `Usage:
+  pebblify completion <bash|zsh>           Print completion script to stdout
+  pebblify completion install <bash|zsh>   Install completion script
+`)
 }
