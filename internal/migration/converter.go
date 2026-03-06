@@ -360,13 +360,13 @@ func convertSingleDB(statePath string, st *state.ConversionState, dbst *state.DB
 	if err != nil {
 		return markDBFailed(statePath, st, dbst, err)
 	}
-	defer srcDB.Close()
+	defer func() { _ = srcDB.Close() }()
 
 	dstDB, err := pebble.Open(dbst.TempPath, &pebble.Options{})
 	if err != nil {
 		return markDBFailed(statePath, st, dbst, err)
 	}
-	defer dstDB.Close()
+	defer func() { _ = dstDB.Close() }()
 
 	var iterRange *util.Range
 	if isResume {
@@ -383,7 +383,7 @@ func convertSingleDB(statePath string, st *state.ConversionState, dbst *state.DB
 	defer it.Release()
 
 	b := batcher.New(dstDB, batchConfig)
-	defer b.Close()
+	defer func() { _ = b.Close() }()
 
 	const checkpointInterval = 50_000
 	count := dbst.MigratedKeys
