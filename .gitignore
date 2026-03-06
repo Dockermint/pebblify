@@ -1,5 +1,6 @@
 # Binary
-pebblify
+/pebblify
+/pebblify-linux-*
 
 # Go workspace
 go.work
