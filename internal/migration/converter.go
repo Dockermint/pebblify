@@ -48,18 +48,14 @@ func RunLevelToPebble(src, out string, cfg *RunConfig, tmpRoot string) error {
 		return fmt.Errorf("failed to create temp data dir %s: %w", tmpData, err)
 	}
 
-	if fsutil.PathExists(out) {
-		empty, err := fsutil.IsDirEmpty(out)
-		if err != nil {
-			return fmt.Errorf("cannot inspect OUT directory: %w", err)
-		}
-		if !empty {
-			return fmt.Errorf("OUT directory %s already exists and is not empty", out)
-		}
-	} else {
+	if !fsutil.PathExists(out) {
 		if err := os.MkdirAll(out, 0o755); err != nil {
+			cleanTmp(tmpRoot)
 			return fmt.Errorf("failed to create OUT directory %s: %w", out, err)
 		}
+	} else if fsutil.PathExists(filepath.Join(out, "data")) {
+		cleanTmp(tmpRoot)
+		return fmt.Errorf("OUT directory %s already contains a data directory", out)
 	}
 
 	st := &state.ConversionState{
@@ -73,6 +69,7 @@ func RunLevelToPebble(src, out string, cfg *RunConfig, tmpRoot string) error {
 
 	fmt.Println("Scanning source directory and estimating keys...")
 	if err := ScanAndPrepare(src, tmpData, st, cfg.Verbose); err != nil {
+		cleanTmp(tmpRoot)
 		return fmt.Errorf("failed to scan SRC: %w", err)
 	}
 
@@ -83,6 +80,7 @@ func RunLevelToPebble(src, out string, cfg *RunConfig, tmpRoot string) error {
 	st.TotalKeysEstimated = totalKeys
 
 	if err := state.Update(statePath, st, nil); err != nil {
+		cleanTmp(tmpRoot)
 		return fmt.Errorf("failed to write initial state file: %w", err)
 	}
 
@@ -133,9 +131,11 @@ func RunLevelToPebble(src, out string, cfg *RunConfig, tmpRoot string) error {
 
 	finalData := filepath.Join(out, "data")
 	if fsutil.PathExists(finalData) {
+		cleanTmp(tmpRoot)
 		return fmt.Errorf("final data dir already exists: %s", finalData)
 	}
 	if err := fsutil.MoveDir(tmpData, finalData); err != nil {
+		cleanTmp(tmpRoot)
 		return fmt.Errorf("failed to move %s to %s: %w", tmpData, finalData, err)
 	}
 
@@ -262,6 +262,7 @@ func finalizeConversion(st *state.ConversionState, tmpRoot string) error {
 	if !fsutil.PathExists(finalData) {
 		fmt.Printf("Moving converted data to %s...\n", finalData)
 		if err := fsutil.MoveDir(tmpData, finalData); err != nil {
+			cleanTmp(tmpRoot)
 			return fmt.Errorf("failed to move data: %w", err)
 		}
 	}
@@ -483,6 +484,10 @@ func convertSingleDB(statePath string, st *state.ConversionState, dbst *state.DB
 
 	fmt.Printf("\nDB %s converted successfully (%d keys)\n", dbst.Name, count)
 	return nil
+}
+
+func cleanTmp(tmpRoot string) {
+	_ = os.RemoveAll(tmpRoot)
 }
 
 func markDBFailed(statePath string, st *state.ConversionState, dbst *state.DBStatus, originalErr error) error {
