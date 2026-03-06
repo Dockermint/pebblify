@@ -1,0 +1,109 @@
+package batcher
+
+import (
+	"github.com/cockroachdb/pebble"
+)
+
+type Config struct {
+	MinBatchSize   int
+	MaxBatchSize   int
+	TargetMemoryMB int
+}
+
+func DefaultConfig() *Config {
+	return &Config{
+		MinBatchSize:   1_000,
+		MaxBatchSize:   100_000,
+		TargetMemoryMB: 64,
+	}
+}
+
+type AdaptiveBatcher struct {
+	config       *Config
+	batch        *pebble.Batch
+	db           *pebble.DB
+	currentCount int64
+	currentBytes int64
+	totalKeys    int64
+	totalBytes   int64
+	avgKeySize   float64
+	avgValueSize float64
+	onCommit     func(keys int64, bytes int64)
+}
+
+func New(db *pebble.DB, config *Config) *AdaptiveBatcher {
+	if config == nil {
+		config = DefaultConfig()
+	}
+	return &AdaptiveBatcher{
+		config: config,
+		batch:  db.NewBatch(),
+		db:     db,
+	}
+}
+
+func (ab *AdaptiveBatcher) SetOnCommit(fn func(keys int64, bytes int64)) {
+	ab.onCommit = fn
+}
+
+func (ab *AdaptiveBatcher) Add(key, value []byte) error {
+	k := make([]byte, len(key))
+	copy(k, key)
+	v := make([]byte, len(value))
+	copy(v, value)
+
+	if err := ab.batch.Set(k, v, nil); err != nil {
+		return err
+	}
+
+	entrySize := int64(len(k) + len(v))
+	ab.currentCount++
+	ab.currentBytes += entrySize
+	ab.totalKeys++
+	ab.totalBytes += entrySize
+
+	targetBytes := int64(ab.config.TargetMemoryMB) * 1024 * 1024
+	shouldCommit := ab.currentBytes >= targetBytes || ab.currentCount >= int64(ab.config.MaxBatchSize)
+
+	if shouldCommit {
+		if err := ab.Commit(); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (ab *AdaptiveBatcher) Commit() error {
+	if ab.currentCount == 0 {
+		return nil
+	}
+
+	if err := ab.batch.Commit(pebble.Sync); err != nil {
+		return err
+	}
+
+	if ab.onCommit != nil {
+		ab.onCommit(ab.currentCount, ab.currentBytes)
+	}
+
+	ab.batch.Reset()
+	ab.currentCount = 0
+	ab.currentBytes = 0
+
+	if ab.totalKeys > 0 {
+		avgEntrySize := float64(ab.totalBytes) / float64(ab.totalKeys)
+		ab.avgKeySize = avgEntrySize * 0.1
+		ab.avgValueSize = avgEntrySize * 0.9
+	}
+
+	return nil
+}
+
+func (ab *AdaptiveBatcher) Stats() (totalKeys, totalBytes int64, avgKeySize, avgValueSize float64) {
+	return ab.totalKeys, ab.totalBytes, ab.avgKeySize, ab.avgValueSize
+}
+
+func (ab *AdaptiveBatcher) Close() error {
+	return ab.batch.Close()
+}
