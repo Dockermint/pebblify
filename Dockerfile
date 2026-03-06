@@ -21,7 +21,7 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build \
     -ldflags="-s -w -X main.Version=${VERSION} -X main.Revision=${REVISION}" \
     -trimpath \
     -o pebblify \
-    .
+    ./cmd/pebblify
 
 # ==============================================================================
 # PRODUCTION STAGE
