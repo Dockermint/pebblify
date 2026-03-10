@@ -14,6 +14,7 @@ import (
 	"github.com/Dockermint/Pebblify/internal/fsutil"
 	"github.com/Dockermint/Pebblify/internal/health"
 	"github.com/Dockermint/Pebblify/internal/migration"
+	"github.com/Dockermint/Pebblify/internal/prom"
 	"github.com/Dockermint/Pebblify/internal/state"
 	"github.com/Dockermint/Pebblify/internal/verify"
 )
@@ -97,6 +98,10 @@ Health probes (opt-in):
   --health          Enable the HTTP health probe server
   --health-port P   Port for the health server (default: 8086)
 
+Prometheus metrics (opt-in):
+  --metrics         Enable the Prometheus metrics server
+  --metrics-port P  Port for the metrics server (default: 9090)
+
 Global flags:
   -h, --help        Show this help
   -V, --version     Show version and exit
@@ -133,6 +138,43 @@ func addHealthFlags(fs *flag.FlagSet) *healthFlags {
 	fs.BoolVar(&hf.enabled, "health", false, "enable HTTP health probe server")
 	fs.IntVar(&hf.port, "health-port", 8086, "port for the health server")
 	return hf
+}
+
+type metricsFlags struct {
+	enabled bool
+	port    int
+}
+
+func addMetricsFlags(fs *flag.FlagSet) *metricsFlags {
+	mf := &metricsFlags{}
+	fs.BoolVar(&mf.enabled, "metrics", false, "enable Prometheus metrics server")
+	fs.IntVar(&mf.port, "metrics-port", 9090, "port for the metrics server")
+	return mf
+}
+
+func startMetricsServer(mf *metricsFlags) *prom.Server {
+	if !mf.enabled {
+		return nil
+	}
+
+	srv := prom.NewServer(mf.port)
+
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			fmt.Fprintf(os.Stderr, "metrics server error: %v\n", err)
+		}
+	}()
+
+	return srv
+}
+
+func stopMetricsServer(srv *prom.Server) {
+	if srv == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = srv.Shutdown(ctx)
 }
 
 func startHealthServer(hf *healthFlags) (*health.Server, *health.ProbeState) {
@@ -173,6 +215,7 @@ func levelToPebbleCmd(args []string) {
 	verbose := fs.Bool("verbose", false, "enable verbose output")
 	fs.BoolVar(verbose, "v", false, "alias for --verbose")
 	hf := addHealthFlags(fs)
+	mf := addMetricsFlags(fs)
 
 	if err := fs.Parse(args); err != nil {
 		os.Exit(1)
@@ -188,6 +231,9 @@ func levelToPebbleCmd(args []string) {
 
 	srv, probeState := startHealthServer(hf)
 	defer stopHealthServer(srv)
+
+	metricsSrv := startMetricsServer(mf)
+	defer stopMetricsServer(metricsSrv)
 
 	src := rest[0]
 	out := rest[1]
@@ -229,9 +275,10 @@ func levelToPebbleCmd(args []string) {
 	defer ticker.Stop()
 
 	cfg := &migration.RunConfig{
-		Workers:     *workers,
-		BatchMemory: *batchMemory,
-		Verbose:     *verbose,
+		Workers:        *workers,
+		BatchMemory:    *batchMemory,
+		Verbose:        *verbose,
+		MetricsEnabled: mf.enabled,
 	}
 
 	if err := migration.RunLevelToPebble(src, out, cfg, tmpRoot); err != nil {
@@ -250,6 +297,7 @@ func recoverCmd(args []string) {
 	verbose := fs.Bool("verbose", false, "enable verbose output")
 	fs.BoolVar(verbose, "v", false, "alias for --verbose")
 	hf := addHealthFlags(fs)
+	mf := addMetricsFlags(fs)
 
 	if err := fs.Parse(args); err != nil {
 		os.Exit(1)
@@ -263,6 +311,9 @@ func recoverCmd(args []string) {
 
 	srv, probeState := startHealthServer(hf)
 	defer stopHealthServer(srv)
+
+	metricsSrv := startMetricsServer(mf)
+	defer stopMetricsServer(metricsSrv)
 
 	baseTmpDir := os.TempDir()
 	if *tmpDir != "" {
@@ -291,7 +342,7 @@ func recoverCmd(args []string) {
 	ticker := health.NewPingTicker(probeState, 5*time.Second)
 	defer ticker.Stop()
 
-	if err := migration.RunRecover(*workers, *batchMemory, tmpRoot, *verbose); err != nil {
+	if err := migration.RunRecover(*workers, *batchMemory, tmpRoot, *verbose, mf.enabled); err != nil {
 		probeState.SetNotReady()
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
