@@ -37,14 +37,23 @@ LABEL org.opencontainers.image.title="Pebblify" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.revision="${REVISION}" \
       org.opencontainers.image.source="https://github.com/Dockermint/Pebblify" \
+      org.opencontainers.image.url="https://www.dockermint.io" \
+      org.opencontainers.image.documentation="https://github.com/Dockermint/Pebblify" \
       org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.vendor="Dockermint" \
-      org.opencontainers.image.created="${CREATED}"
+      org.opencontainers.image.authors="Dockermint" \
+      org.opencontainers.image.created="${CREATED}" \
+      org.opencontainers.image.base.name="alpine:3.22"
 
-RUN apk add --no-cache ca-certificates tzdata \
+RUN apk add --no-cache ca-certificates tzdata curl \
     && adduser -D -H -u 10000 -s /sbin/nologin appuser
 
 COPY --from=builder /build/pebblify /usr/local/bin/pebblify
+
+EXPOSE 8086 9090
+
+HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8086/healthz/live || exit 1
 
 USER 10000:10000
 

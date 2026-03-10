@@ -1,14 +1,20 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
+	"time"
 
+	"github.com/Dockermint/Pebblify/internal/completion"
 	"github.com/Dockermint/Pebblify/internal/fsutil"
+	"github.com/Dockermint/Pebblify/internal/health"
 	"github.com/Dockermint/Pebblify/internal/migration"
+	"github.com/Dockermint/Pebblify/internal/prom"
 	"github.com/Dockermint/Pebblify/internal/state"
 	"github.com/Dockermint/Pebblify/internal/verify"
 )
@@ -38,6 +44,8 @@ func main() {
 		recoverCmd(os.Args[2:])
 	case "verify":
 		verifyCmd(os.Args[2:])
+	case "completion":
+		completionCmd(os.Args[2:])
 	case "-h", "--help", "help":
 		usage()
 	default:
@@ -64,6 +72,7 @@ Commands:
   level-to-pebble   Convert a Tendermint/CometBFT data/ directory from LevelDB to PebbleDB
   recover           Resume a previously interrupted conversion
   verify            Verify that converted data matches the source
+  completion        Generate or install shell completion scripts
   version           Show version information
 
 Options for level-to-pebble:
@@ -85,6 +94,14 @@ Options for verify:
   --stop-on-error   Stop at first mismatch
   -v, --verbose     Show each key being verified
 
+Health probes (opt-in):
+  --health          Enable the HTTP health probe server
+  --health-port P   Port for the health server (default: 8086)
+
+Prometheus metrics (opt-in):
+  --metrics         Enable the Prometheus metrics server
+  --metrics-port P  Port for the metrics server (default: 9090)
+
 Global flags:
   -h, --help        Show this help
   -V, --version     Show version and exit
@@ -99,7 +116,92 @@ Examples:
   # Verify the converted data
   pebblify verify ~/.gaia/data ./output/data
 
+  # Convert with health probes enabled
+  pebblify level-to-pebble --health --health-port 8086 ~/.gaia/data ./output
+
+  # Generate bash completion script
+  pebblify completion bash
+
+  # Install zsh completion
+  pebblify completion install zsh
+
 `, Version)
+}
+
+type healthFlags struct {
+	enabled bool
+	port    int
+}
+
+func addHealthFlags(fs *flag.FlagSet) *healthFlags {
+	hf := &healthFlags{}
+	fs.BoolVar(&hf.enabled, "health", false, "enable HTTP health probe server")
+	fs.IntVar(&hf.port, "health-port", 8086, "port for the health server")
+	return hf
+}
+
+type metricsFlags struct {
+	enabled bool
+	port    int
+}
+
+func addMetricsFlags(fs *flag.FlagSet) *metricsFlags {
+	mf := &metricsFlags{}
+	fs.BoolVar(&mf.enabled, "metrics", false, "enable Prometheus metrics server")
+	fs.IntVar(&mf.port, "metrics-port", 9090, "port for the metrics server")
+	return mf
+}
+
+func startMetricsServer(mf *metricsFlags) *prom.Server {
+	if !mf.enabled {
+		return nil
+	}
+
+	srv := prom.NewServer(mf.port)
+
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			fmt.Fprintf(os.Stderr, "metrics server error: %v\n", err)
+		}
+	}()
+
+	return srv
+}
+
+func stopMetricsServer(srv *prom.Server) {
+	if srv == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = srv.Shutdown(ctx)
+}
+
+func startHealthServer(hf *healthFlags) (*health.Server, *health.ProbeState) {
+	probeState := health.NewProbeState(30 * time.Second)
+
+	if !hf.enabled {
+		return nil, probeState
+	}
+
+	srv := health.NewServer(hf.port, probeState)
+
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			fmt.Fprintf(os.Stderr, "health server error: %v\n", err)
+		}
+	}()
+
+	return srv, probeState
+}
+
+func stopHealthServer(srv *health.Server) {
+	if srv == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = srv.Shutdown(ctx)
 }
 
 func levelToPebbleCmd(args []string) {
@@ -112,6 +214,8 @@ func levelToPebbleCmd(args []string) {
 	tmpDir := fs.String("tmp-dir", "", "directory where .pebblify-tmp will be created (default: system temp)")
 	verbose := fs.Bool("verbose", false, "enable verbose output")
 	fs.BoolVar(verbose, "v", false, "alias for --verbose")
+	hf := addHealthFlags(fs)
+	mf := addMetricsFlags(fs)
 
 	if err := fs.Parse(args); err != nil {
 		os.Exit(1)
@@ -124,6 +228,12 @@ func levelToPebbleCmd(args []string) {
 		fs.PrintDefaults()
 		os.Exit(1)
 	}
+
+	srv, probeState := startHealthServer(hf)
+	defer stopHealthServer(srv)
+
+	metricsSrv := startMetricsServer(mf)
+	defer stopMetricsServer(metricsSrv)
 
 	src := rest[0]
 	out := rest[1]
@@ -158,13 +268,21 @@ func levelToPebbleCmd(args []string) {
 	}
 	defer unlock()
 
+	probeState.SetStarted()
+	probeState.SetReady()
+
+	ticker := health.NewPingTicker(probeState, 5*time.Second)
+	defer ticker.Stop()
+
 	cfg := &migration.RunConfig{
-		Workers:     *workers,
-		BatchMemory: *batchMemory,
-		Verbose:     *verbose,
+		Workers:        *workers,
+		BatchMemory:    *batchMemory,
+		Verbose:        *verbose,
+		MetricsEnabled: mf.enabled,
 	}
 
 	if err := migration.RunLevelToPebble(src, out, cfg, tmpRoot); err != nil {
+		probeState.SetNotReady()
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
@@ -178,6 +296,8 @@ func recoverCmd(args []string) {
 	tmpDir := fs.String("tmp-dir", "", "directory containing .pebblify-tmp (must match conversion)")
 	verbose := fs.Bool("verbose", false, "enable verbose output")
 	fs.BoolVar(verbose, "v", false, "alias for --verbose")
+	hf := addHealthFlags(fs)
+	mf := addMetricsFlags(fs)
 
 	if err := fs.Parse(args); err != nil {
 		os.Exit(1)
@@ -188,6 +308,12 @@ func recoverCmd(args []string) {
 		fmt.Fprintf(os.Stderr, "Usage: pebblify recover [options]\n")
 		os.Exit(1)
 	}
+
+	srv, probeState := startHealthServer(hf)
+	defer stopHealthServer(srv)
+
+	metricsSrv := startMetricsServer(mf)
+	defer stopMetricsServer(metricsSrv)
 
 	baseTmpDir := os.TempDir()
 	if *tmpDir != "" {
@@ -210,7 +336,14 @@ func recoverCmd(args []string) {
 	}
 	defer unlock()
 
-	if err := migration.RunRecover(*workers, *batchMemory, tmpRoot, *verbose); err != nil {
+	probeState.SetStarted()
+	probeState.SetReady()
+
+	ticker := health.NewPingTicker(probeState, 5*time.Second)
+	defer ticker.Stop()
+
+	if err := migration.RunRecover(*workers, *batchMemory, tmpRoot, *verbose, mf.enabled); err != nil {
+		probeState.SetNotReady()
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
@@ -248,4 +381,66 @@ func verifyCmd(args []string) {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+func completionCmd(args []string) {
+	if len(args) == 0 {
+		completionUsage()
+		os.Exit(1)
+	}
+
+	switch args[0] {
+	case "bash":
+		fmt.Print(completion.GenerateBash())
+	case "zsh":
+		fmt.Print(completion.GenerateZsh())
+	case "install":
+		completionInstallCmd(args[1:])
+	default:
+		fmt.Fprintf(os.Stderr, "unknown shell: %s\n\n", args[0])
+		completionUsage()
+		os.Exit(1)
+	}
+}
+
+func completionInstallCmd(args []string) {
+	if len(args) == 0 {
+		fmt.Fprintf(os.Stderr, "missing shell argument\n\n")
+		completionUsage()
+		os.Exit(1)
+	}
+
+	var (
+		dest string
+		err  error
+		hint string
+	)
+
+	switch args[0] {
+	case "bash":
+		dest, err = completion.InstallBash()
+		hint = fmt.Sprintf("source %s", dest)
+	case "zsh":
+		dest, err = completion.InstallZsh()
+		hint = "autoload -Uz compinit && compinit"
+	default:
+		fmt.Fprintf(os.Stderr, "unknown shell: %s\n\n", args[0])
+		completionUsage()
+		os.Exit(1)
+	}
+
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Fprintf(os.Stderr, "completion installed to %s\n", dest)
+	fmt.Fprintf(os.Stderr, "reload with: %s\n", hint)
+}
+
+func completionUsage() {
+	fmt.Fprintf(os.Stderr, `Usage:
+  pebblify completion <bash|zsh>           Print completion script to stdout
+  pebblify completion install <bash|zsh>   Install completion script
+`)
 }

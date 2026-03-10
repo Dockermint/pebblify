@@ -16,14 +16,16 @@ import (
 	"github.com/Dockermint/Pebblify/internal/batcher"
 	"github.com/Dockermint/Pebblify/internal/fsutil"
 	"github.com/Dockermint/Pebblify/internal/metrics"
+	"github.com/Dockermint/Pebblify/internal/prom"
 	"github.com/Dockermint/Pebblify/internal/progress"
 	"github.com/Dockermint/Pebblify/internal/state"
 )
 
 type RunConfig struct {
-	Workers     int
-	BatchMemory int
-	Verbose     bool
+	Workers        int
+	BatchMemory    int
+	Verbose        bool
+	MetricsEnabled bool
 }
 
 func RunLevelToPebble(src, out string, cfg *RunConfig, tmpRoot string) error {
@@ -123,7 +125,7 @@ func RunLevelToPebble(src, out string, cfg *RunConfig, tmpRoot string) error {
 	}
 
 	startRun := time.Now()
-	if err := convertAllDBs(statePath, st, workers, batchConfig, m, cfg.Verbose); err != nil {
+	if err := convertAllDBs(statePath, st, workers, batchConfig, m, cfg.Verbose, cfg.MetricsEnabled); err != nil {
 		close(doneCh)
 		return err
 	}
@@ -172,7 +174,7 @@ func RunLevelToPebble(src, out string, cfg *RunConfig, tmpRoot string) error {
 	return nil
 }
 
-func RunRecover(workers, batchMemory int, tmpRoot string, verbose bool) error {
+func RunRecover(workers, batchMemory int, tmpRoot string, verbose bool, metricsEnabled bool) error {
 	statePath := filepath.Join(tmpRoot, state.StateFileName)
 
 	st, err := state.Read(statePath)
@@ -244,7 +246,7 @@ func RunRecover(workers, batchMemory int, tmpRoot string, verbose bool) error {
 		TargetMemoryMB: batchMemory,
 	}
 
-	if err := convertAllDBs(statePath, st, workers, batchConfig, m, verbose); err != nil {
+	if err := convertAllDBs(statePath, st, workers, batchConfig, m, verbose, metricsEnabled); err != nil {
 		close(doneCh)
 		return err
 	}
@@ -289,7 +291,7 @@ func finalizeConversion(st *state.ConversionState, tmpRoot string) error {
 	return nil
 }
 
-func convertAllDBs(statePath string, st *state.ConversionState, workers int, batchConfig *batcher.Config, m *metrics.Metrics, verbose bool) error {
+func convertAllDBs(statePath string, st *state.ConversionState, workers int, batchConfig *batcher.Config, m *metrics.Metrics, verbose bool, metricsEnabled bool) error {
 	dbList := state.CollectPendingDBs(st)
 	if len(dbList) == 0 {
 		return nil
@@ -302,7 +304,7 @@ func convertAllDBs(statePath string, st *state.ConversionState, workers int, bat
 	for range workers {
 		wg.Go(func() {
 			for dbst := range jobs {
-				if err := convertSingleDB(statePath, st, dbst, batchConfig, m, verbose); err != nil {
+				if err := convertSingleDB(statePath, st, dbst, batchConfig, m, verbose, metricsEnabled); err != nil {
 					errCh <- err
 				}
 			}
@@ -328,7 +330,7 @@ func convertAllDBs(statePath string, st *state.ConversionState, workers int, bat
 	return nil
 }
 
-func convertSingleDB(statePath string, st *state.ConversionState, dbst *state.DBStatus, batchConfig *batcher.Config, m *metrics.Metrics, verbose bool) error {
+func convertSingleDB(statePath string, st *state.ConversionState, dbst *state.DBStatus, batchConfig *batcher.Config, m *metrics.Metrics, verbose bool, metricsEnabled bool) error {
 	fmt.Printf("\nConverting DB %s", dbst.Name)
 
 	isResume := dbst.Status == "in_progress" && dbst.GetLastCheckpointKey() != nil
@@ -351,6 +353,10 @@ func convertSingleDB(statePath string, st *state.ConversionState, dbst *state.DB
 		dbst.Error = ""
 	}); err != nil {
 		return fmt.Errorf("failed to update state: %w", err)
+	}
+
+	if metricsEnabled {
+		updateDBGauges(st)
 	}
 
 	srcDB, err := leveldb.OpenFile(dbst.SourcePath, &levopt.Options{
@@ -419,6 +425,11 @@ func convertSingleDB(statePath string, st *state.ConversionState, dbst *state.DB
 				return markDBFailed(statePath, st, dbst, err)
 			}
 
+			if metricsEnabled {
+				prom.BatchCommits.Inc()
+				prom.Checkpoints.Inc()
+			}
+
 			if err := state.Update(statePath, st, func() {
 				dbst.MigratedKeys = count
 				dbst.SetLastCheckpointKey(lastKey)
@@ -432,6 +443,16 @@ func convertSingleDB(statePath string, st *state.ConversionState, dbst *state.DB
 
 			if time.Since(lastMetricsUpdate) >= time.Second {
 				m.RecordKeys(dbst.Name, intervalKeys, intervalBytes, intervalBytes)
+
+				if metricsEnabled {
+					prom.KeysProcessed.Add(float64(intervalKeys))
+					prom.BytesRead.Add(float64(intervalBytes))
+					prom.BytesWritten.Add(float64(intervalBytes))
+					kps, bps := m.GetCurrentThroughput()
+					prom.KeysPerSecond.Set(kps)
+					prom.BytesPerSecond.Set(bps * 1024 * 1024)
+				}
+
 				intervalKeys = 0
 				intervalBytes = 0
 				lastMetricsUpdate = time.Now()
@@ -445,10 +466,20 @@ func convertSingleDB(statePath string, st *state.ConversionState, dbst *state.DB
 
 	if intervalKeys > 0 {
 		m.RecordKeys(dbst.Name, intervalKeys, intervalBytes, intervalBytes)
+
+		if metricsEnabled {
+			prom.KeysProcessed.Add(float64(intervalKeys))
+			prom.BytesRead.Add(float64(intervalBytes))
+			prom.BytesWritten.Add(float64(intervalBytes))
+		}
 	}
 
 	if err := b.Commit(); err != nil {
 		return markDBFailed(statePath, st, dbst, err)
+	}
+
+	if metricsEnabled {
+		prom.BatchCommits.Inc()
 	}
 
 	if err := it.Error(); err != nil {
@@ -482,8 +513,27 @@ func convertSingleDB(statePath string, st *state.ConversionState, dbst *state.DB
 		return fmt.Errorf("failed to finalize state: %w", err)
 	}
 
+	if metricsEnabled {
+		updateDBGauges(st)
+	}
+
 	fmt.Printf("\nDB %s converted successfully (%d keys)\n", dbst.Name, count)
 	return nil
+}
+
+func updateDBGauges(st *state.ConversionState) {
+	counts := map[string]float64{
+		"pending":     0,
+		"in_progress": 0,
+		"done":        0,
+		"failed":      0,
+	}
+	for _, db := range st.DBs {
+		counts[db.Status]++
+	}
+	for status, count := range counts {
+		prom.Databases.WithLabelValues(status).Set(count)
+	}
 }
 
 func cleanTmp(tmpRoot string) {

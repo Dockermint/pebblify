@@ -64,6 +64,21 @@ jobs:
 
       - uses: docker/setup-buildx-action@v3
 
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          labels: |
+            org.opencontainers.image.title=Pebblify
+            org.opencontainers.image.description=LevelDB to PebbleDB migration tool for Cosmos/CometBFT nodes.
+            org.opencontainers.image.url=https://www.dockermint.io
+            org.opencontainers.image.documentation=https://github.com/Dockermint/Pebblify
+            org.opencontainers.image.licenses=Apache-2.0
+            org.opencontainers.image.vendor=Dockermint
+            org.opencontainers.image.authors=Dockermint
+            org.opencontainers.image.base.name=alpine:3.22
+
       - name: Build image (no push)
         uses: docker/build-push-action@v6
         with:
@@ -74,3 +89,4 @@ jobs:
             VERSION=${{ github.sha }}
             REVISION=${{ github.sha }}
             CREATED=${{ github.event.head_commit.timestamp }}
+          labels: ${{ steps.meta.outputs.labels }}
