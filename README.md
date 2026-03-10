@@ -9,7 +9,7 @@
 
 PebbleDB offers significant performance improvements over LevelDB, including better write throughput, more efficient compaction, and reduced storage overhead. Pebblify makes it easy to migrate your existing node data without manual intervention.
 
-📖 [Documentation](https://docs.dockermint.io/pebblify/v0.1.0/overview) · 🌐 [Website](https://dockermint.io/tools)
+📖 [Documentation](https://docs.dockermint.io/pebblify/v0.3.0/overview) · 🌐 [Website](https://dockermint.io/tools)
 
 > [!WARNING]
 > This tool is still in the early stages of development and may contain bugs or be unstable. If you notice any unusual behavior, please open an issue.
@@ -23,6 +23,9 @@ PebbleDB offers significant performance improvements over LevelDB, including bet
 - **Data verification** — Verify converted data integrity with configurable sampling
 - **Disk space checks** — Pre-flight validation to ensure sufficient storage
 - **Docker support** — Multi-architecture container images (amd64/arm64)
+- **Health probes** — HTTP liveness, readiness, and startup endpoints for orchestrators
+- **Prometheus metrics** — Opt-in metrics exporter for conversion monitoring
+- **Shell completion** — Bash and zsh autocompletion via `pebblify completion`
 
 ## Requirements
 
@@ -70,15 +73,17 @@ pebblify verify --sample 10 ~/.gaia/data ./gaia-pebble/data
 ### Docker
 
 ```bash
+docker pull ghcr.io/dockermint/pebblify:latest
+
 docker run --rm \
   -v /path/to/source:/data/source:ro \
   -v /path/to/output:/data/output \
   -v /path/to/tmp:/tmp \
-  dockermint/pebblify:latest \
-  level-to-pebble /data/source /data/output
+  ghcr.io/dockermint/pebblify:latest \
+  level-to-pebble --health --metrics /data/source /data/output
 ```
 
-> For full command reference and all available flags, see the [documentation](https://docs.dockermint.io/pebblify/v0.1.0/overview).
+> For full command reference and all available flags, see the [documentation](https://docs.dockermint.io/pebblify/v0.3.0/overview).
 
 ## Benchmark
 
