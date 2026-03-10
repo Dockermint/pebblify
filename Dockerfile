@@ -46,7 +46,7 @@ RUN apk add --no-cache ca-certificates tzdata curl \
 
 COPY --from=builder /build/pebblify /usr/local/bin/pebblify
 
-EXPOSE 8086
+EXPOSE 8086 9090
 
 HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8086/healthz/live || exit 1

@@ -54,12 +54,12 @@ func (s *Server) handleLiveness(w http.ResponseWriter, r *http.Request) {
 
 	if s.state.IsAlive() {
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprintln(w, "ok")
+		_, _ = fmt.Fprintln(w, "ok")
 		return
 	}
 
 	w.WriteHeader(http.StatusServiceUnavailable)
-	fmt.Fprintln(w, "not alive")
+	_, _ = fmt.Fprintln(w, "not alive")
 }
 
 func (s *Server) handleReadiness(w http.ResponseWriter, r *http.Request) {
@@ -70,12 +70,12 @@ func (s *Server) handleReadiness(w http.ResponseWriter, r *http.Request) {
 
 	if s.state.IsReady() {
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprintln(w, "ok")
+		_, _ = fmt.Fprintln(w, "ok")
 		return
 	}
 
 	w.WriteHeader(http.StatusServiceUnavailable)
-	fmt.Fprintln(w, "not ready")
+	_, _ = fmt.Fprintln(w, "not ready")
 }
 
 func (s *Server) handleStartup(w http.ResponseWriter, r *http.Request) {
@@ -86,10 +86,10 @@ func (s *Server) handleStartup(w http.ResponseWriter, r *http.Request) {
 
 	if s.state.IsStarted() {
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprintln(w, "ok")
+		_, _ = fmt.Fprintln(w, "ok")
 		return
 	}
 
 	w.WriteHeader(http.StatusServiceUnavailable)
-	fmt.Fprintln(w, "not started")
+	_, _ = fmt.Fprintln(w, "not started")
 }
