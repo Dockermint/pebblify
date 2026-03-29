@@ -1,5 +1,20 @@
 # Changelog
 
+## [v0.3.1](https://github.com/Dockermint/Pebblify/compare/v0.3.0...v0.3.1)
+
+### Performance
+
+- perf(migration): optimize PebbleDB write options for smaller output ([#16](https://github.com/Dockermint/Pebblify/pull/16))
+
+### CI
+
+- ci: run CI on develop branch ([#15](https://github.com/Dockermint/Pebblify/pull/15))
+
+### Documentation
+
+- docs: update documentation link to remove versioned path ([#14](https://github.com/Dockermint/Pebblify/pull/14))
+- docs(readme): update benchmark with optimized results ([#16](https://github.com/Dockermint/Pebblify/pull/16))
+
 ## [v0.3.0](https://github.com/Dockermint/Pebblify/compare/v0.2.0...v0.3.0)
 
 ### Features
