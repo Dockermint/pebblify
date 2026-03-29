@@ -2,6 +2,7 @@ package migration
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -368,7 +369,21 @@ func convertSingleDB(statePath string, st *state.ConversionState, dbst *state.DB
 	}
 	defer func() { _ = srcDB.Close() }()
 
-	dstDB, err := pebble.Open(dbst.TempPath, &pebble.Options{})
+	dstDB, err := pebble.Open(dbst.TempPath, &pebble.Options{
+		DisableAutomaticCompactions: true,
+		L0CompactionFileThreshold:   math.MaxInt,
+		L0CompactionThreshold:       math.MaxInt,
+		L0StopWritesThreshold:       math.MaxInt,
+		MaxConcurrentCompactions:    func() int { return 1 },
+		MaxOpenFiles:                100,
+		Levels: []pebble.LevelOptions{
+			{
+				BlockSize:      32 << 10,
+				IndexBlockSize: 32 << 10,
+				TargetFileSize: 128 << 20,
+			},
+		},
+	})
 	if err != nil {
 		return markDBFailed(statePath, st, dbst, err)
 	}

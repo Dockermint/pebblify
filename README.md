@@ -2,14 +2,14 @@
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go&logoColor=white)](https://go.dev/)
-![Benchmark](https://img.shields.io/badge/benchmark-216M_keys_in_4m9s-brightgreen)
-![Throughput](https://img.shields.io/badge/throughput-866k_keys%2Fs-blue)
+![Benchmark](https://img.shields.io/badge/benchmark-217M_keys_in_4m11s-brightgreen)
+![Throughput](https://img.shields.io/badge/throughput-865k_keys%2Fs-blue)
 
 **Pebblify** is a high-performance migration tool that converts LevelDB databases to PebbleDB format, specifically designed for Cosmos SDK and CometBFT (formerly Tendermint) blockchain nodes.
 
 PebbleDB offers significant performance improvements over LevelDB, including better write throughput, more efficient compaction, and reduced storage overhead. Pebblify makes it easy to migrate your existing node data without manual intervention.
 
-📖 [Documentation](https://docs.dockermint.io/pebblify/v0.3.0/overview) · 🌐 [Website](https://dockermint.io/tools)
+📖 [Documentation](https://docs.dockermint.io/pebblify) · 🌐 [Website](https://dockermint.io/tools)
 
 > [!WARNING]
 > This tool is still in the early stages of development and may contain bugs or be unstable. If you notice any unusual behavior, please open an issue.
@@ -83,7 +83,7 @@ docker run --rm \
   level-to-pebble --health --metrics /data/source /data/output
 ```
 
-> For full command reference and all available flags, see the [documentation](https://docs.dockermint.io/pebblify/v0.3.0/overview).
+> For full command reference and all available flags, see the [documentation](https://docs.dockermint.io/pebblify).
 
 ## Benchmark
 
@@ -91,11 +91,11 @@ Real-world conversion on a production Cosmos node dataset:
 
 | Metric | Value |
 |---|---|
-| Total keys | 216,404,586 |
-| Duration | 4m 9s |
-| Throughput | ~866k keys/s · ~160 MB/s |
-| Data processed | 39 GiB read / 39 GiB written |
-| Size overhead | +3.7% (LevelDB 23.04 GiB → PebbleDB 23.91 GiB) |
+| Total keys | 217,895,735 |
+| Duration | 4m 11s |
+| Throughput | ~865k keys/s · ~160 MB/s |
+| Data processed | 39.54 GiB read / 39.54 GiB written |
+| Size reduction | -16.3% (LevelDB 23.32 GiB → PebbleDB 19.51 GiB) |
 | Data loss | None — 1:1 write/read parity |
 
 > [!NOTE]
