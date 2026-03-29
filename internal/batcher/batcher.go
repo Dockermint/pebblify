@@ -79,7 +79,7 @@ func (ab *AdaptiveBatcher) Commit() error {
 		return nil
 	}
 
-	if err := ab.batch.Commit(pebble.Sync); err != nil {
+	if err := ab.batch.Commit(pebble.NoSync); err != nil {
 		return err
 	}
 
