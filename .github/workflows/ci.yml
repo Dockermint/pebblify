@@ -14,9 +14,9 @@ jobs:
     name: Lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
 
@@ -24,7 +24,7 @@ jobs:
         run: go vet ./...
 
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v7
+        uses: golangci/golangci-lint-action@v9
         with:
           version: latest
 
@@ -37,9 +37,9 @@ jobs:
         goos: [linux]
         goarch: [amd64, arm64]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
 
@@ -60,27 +60,27 @@ jobs:
     runs-on: ubuntu-latest
     needs: lint
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
       - name: Docker metadata
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ghcr.io/${{ github.repository }}
           labels: |
             org.opencontainers.image.title=Pebblify
             org.opencontainers.image.description=LevelDB to PebbleDB migration tool for Cosmos/CometBFT nodes.
             org.opencontainers.image.url=https://www.dockermint.io
-            org.opencontainers.image.documentation=https://github.com/Dockermint/Pebblify
+            org.opencontainers.image.documentation=https://docs.dockermint.io/pebblify/
             org.opencontainers.image.licenses=Apache-2.0
             org.opencontainers.image.vendor=Dockermint
             org.opencontainers.image.authors=Dockermint
             org.opencontainers.image.base.name=alpine:3.22
 
       - name: Build image (no push)
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           push: false
