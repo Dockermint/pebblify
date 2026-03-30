@@ -9,7 +9,7 @@
 
 PebbleDB offers significant performance improvements over LevelDB, including better write throughput, more efficient compaction, and reduced storage overhead. Pebblify makes it easy to migrate your existing node data without manual intervention.
 
-📖 [Documentation](https://docs.dockermint.io/pebblify) · 🌐 [Website](https://dockermint.io/tools)
+📖 [Documentation](https://docs.dockermint.io/pebblify/) · 🌐 [Website](https://dockermint.io/tools)
 
 > [!WARNING]
 > This tool is still in the early stages of development and may contain bugs or be unstable. If you notice any unusual behavior, please open an issue.
@@ -83,7 +83,7 @@ docker run --rm \
   level-to-pebble --health --metrics /data/source /data/output
 ```
 
-> For full command reference and all available flags, see the [documentation](https://docs.dockermint.io/pebblify).
+> For full command reference and all available flags, see the [documentation](https://docs.dockermint.io/pebblify/).
 
 ## Benchmark
 
