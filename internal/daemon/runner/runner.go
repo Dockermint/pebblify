@@ -13,7 +13,9 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -357,14 +359,22 @@ func (r *jobRunner) ensureDiskBudget(root string, archiveSize int64) error {
 	return nil
 }
 
-// download fetches url into dir and returns the on-disk archive path plus
-// its size in bytes. Progress is logged every downloadProgressInterval.
+// download fetches rawURL into dir and returns the on-disk archive path plus
+// its size in bytes. Progress is logged every downloadProgressInterval. An
+// empty URL basename (e.g. "https://host" or "https://host/") yields an
+// invalid-URL error so the job fails cleanly rather than writing to a
+// filename derived from the hostname.
 func (r *jobRunner) download(ctx context.Context, logger *slog.Logger,
-	url, dir string) (string, int64, error) {
+	rawURL, dir string) (string, int64, error) {
+	basename := urlBasename(rawURL)
+	if basename == "" {
+		return "", 0, fmt.Errorf("invalid snapshot url %q: missing filename in path", rawURL)
+	}
+
 	dlCtx, cancel := context.WithTimeout(ctx, downloadTimeout)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(dlCtx, http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(dlCtx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return "", 0, fmt.Errorf("build request: %w", err)
 	}
@@ -378,10 +388,6 @@ func (r *jobRunner) download(ctx context.Context, logger *slog.Logger,
 		return "", 0, fmt.Errorf("http status %d", resp.StatusCode)
 	}
 
-	basename := urlBasename(url)
-	if basename == "" {
-		basename = "snapshot"
-	}
 	dest := filepath.Join(dir, basename)
 	out, err := os.Create(dest)
 	if err != nil {
@@ -572,17 +578,25 @@ func archiveStem(filename string) string {
 	return filename
 }
 
-// urlBasename returns the final path component of a raw URL string. Query
-// strings and fragments are trimmed; an empty result falls back to the
-// default "snapshot" in the caller.
+// urlBasename returns the final path component of raw. Query strings and
+// fragments are ignored. When raw is unparseable, has no path, or the path is
+// "/", the returned basename is the empty string so callers can surface a
+// validation error instead of persisting a junk filename derived from the
+// host.
 func urlBasename(raw string) string {
-	if i := strings.IndexAny(raw, "?#"); i >= 0 {
-		raw = raw[:i]
+	u, err := url.Parse(raw)
+	if err != nil {
+		return ""
 	}
-	if i := strings.LastIndex(raw, "/"); i >= 0 {
-		return raw[i+1:]
+	p := u.Path
+	if p == "" || p == "/" {
+		return ""
 	}
-	return raw
+	base := path.Base(p)
+	if base == "/" || base == "." {
+		return ""
+	}
+	return base
 }
 
 // findLevelDBRoot locates a directory under root that contains one or more

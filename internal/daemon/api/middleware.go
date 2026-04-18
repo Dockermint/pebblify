@@ -53,7 +53,14 @@ func logRequests(logger *slog.Logger, next http.Handler) http.Handler {
 // recoverPanic converts handler panics into a 500 response and an ERROR log.
 // The token and any other secret must never reach the log line; the recovered
 // value is formatted with %v which avoids reflecting struct internals.
+//
+// A nil logger is tolerated: the middleware falls back to slog.Default at
+// construction time so every downstream recover path sees a non-nil logger
+// and cannot trigger a secondary nil-pointer panic.
 func recoverPanic(logger *slog.Logger, next http.Handler) http.Handler {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			if rec := recover(); rec != nil {
@@ -91,7 +98,16 @@ func basicAuth(token, mode string, next http.Handler) http.Handler {
 // checkAuth returns true if r carries either an HTTP Basic password or a
 // Bearer token matching expected. Both comparisons use constant-time
 // primitives so an attacker cannot infer the token via timing.
+//
+// An empty expected token always fails closed: subtle.ConstantTimeCompare
+// reports a match between two empty byte slices, which would grant access to
+// any unauthenticated request. Config validation already forbids an empty
+// PEBBLIFY_BASIC_AUTH_TOKEN when mode=basic_auth, but this guard defends
+// against any caller constructing the middleware directly.
 func checkAuth(r *http.Request, expected string) bool {
+	if expected == "" {
+		return false
+	}
 	expectedBytes := []byte(expected)
 
 	if _, password, ok := r.BasicAuth(); ok {
