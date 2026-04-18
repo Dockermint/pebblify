@@ -1,0 +1,116 @@
+language: en
+early_access: true
+
+reviews:
+  profile: "assertive"
+
+  auto_review:
+    enabled: true
+    drafts: false
+    base_branches:
+      - "develop"
+    ignore_title_patterns:
+      - "WIP"
+      - "Draft"
+      - "DO NOT MERGE"
+
+  high_level_summary: true
+  review_status: true
+  commit_status: true
+  sequence_diagrams: true
+  changed_files_summary: true
+  related_issues: true
+  request_changes_workflow: true
+
+  path_instructions:
+    - path: "cmd/**/*.go"
+      instructions: |
+        Review for compliance with project conventions:
+        - No panic() in production paths; return errors instead
+        - Proper error wrapping with fmt.Errorf("...: %w", err)
+        - Never ignore errors with bare `_`
+        - Functions limited to 5 parameters; use config struct otherwise
+        - context.Context as first parameter for cancellable work
+        - No emoji or unicode emoji in code
+        - No fmt.Println/log.Println debug statements; use zerolog/slog
+        - Exported identifiers must have godoc comments
+        - No //nolint or //lint:ignore directives
+
+    - path: "internal/**/*.go"
+      instructions: |
+        Review for compliance with project conventions:
+        - No panic() in production paths; return errors instead
+        - Proper error wrapping with fmt.Errorf("...: %w", err)
+        - Never ignore errors with bare `_`
+        - Functions limited to 5 parameters; use config struct otherwise
+        - context.Context as first parameter for cancellable work
+        - Prefer small interfaces defined at call site (consumer-side)
+        - Preallocate slices with known capacity (make([]T, 0, n))
+        - Use strings.Builder in hot loops, not += concatenation
+        - sync.Pool for object reuse in hot paths
+        - Exported identifiers must have godoc comments
+        - No //nolint or //lint:ignore directives
+
+    - path: "**/*_test.go"
+      instructions: |
+        Validate test quality:
+        - Table-driven tests with named subtests (t.Run)
+        - Use testify/require for setup assertions, testify/assert for checks
+        - Race detector compatibility (no data races)
+        - No t.Skip() without clear justification
+        - Integration tests gated with //go:build integration
+
+    - path: "Dockerfile*"
+      instructions: |
+        Validate container build conventions:
+        - Multi-stage build with minimal final base (distroless or alpine)
+        - Non-root USER directive
+        - HEALTHCHECK present for long-running services
+        - OCI labels (org.opencontainers.image.*)
+        - Pinned base image digests (sha256:...)
+        - No secrets in layers; use --mount=type=secret
+        - Minimize layer count and cache invalidation
+
+    - path: "docker-compose*.yml"
+      instructions: |
+        Validate compose conventions:
+        - Named volumes over bind mounts for persistent data
+        - Explicit network definitions
+        - Resource limits (cpus, memory) for production services
+        - Healthchecks matching Dockerfile HEALTHCHECK
+        - No hardcoded secrets; reference .env via env_file
+
+    - path: "**/*.container"
+      instructions: |
+        Validate Podman Quadlet unit files:
+        - [Unit], [Container], [Service], [Install] sections present and ordered
+        - Image pinned by digest
+        - Proper User/Group for rootless operation
+        - Restart policy defined
+        - Volume/Network references use Quadlet-managed units when possible
+
+    - path: ".github/workflows/**/*.yml"
+      instructions: |
+        Validate CI workflow conventions:
+        - Actions pinned to commit SHA (not tag)
+        - Matrix builds cover linux/amd64, linux/arm64, darwin/amd64, darwin/arm64
+        - Zero-warnings policy: go vet, golangci-lint, gofmt -l
+        - govulncheck ./... runs on every push
+        - GPG signing configured for release artifacts
+
+  path_filters:
+    - "!**/*.md"
+    - "!**/*.mdx"
+    - "!**/vendor/**"
+    - "!**/testdata/**"
+    - "!go.sum"
+
+chat:
+  auto_reply: true
+
+knowledge_base:
+  code_guidelines:
+    enabled: true
+    filePatterns:
+      - "**/CLAUDE.md"
+      - ".claude/agents/**/*.md"
