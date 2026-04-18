@@ -11,6 +11,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path"
@@ -136,6 +137,15 @@ func (t *S3Target) Upload(ctx context.Context, localPath, remoteName string) err
 	info, err := f.Stat()
 	if err != nil {
 		return fmt.Errorf("s3 upload: stat %s: %w", localPath, err)
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("s3 upload: %s is not a regular file", localPath)
+	}
+	// Some platforms (and some io.Reader wrappers) advance the file offset as
+	// part of Stat or any preliminary probe; rewind explicitly so PutObject
+	// always streams the full body.
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return fmt.Errorf("s3 upload: seek %s: %w", localPath, err)
 	}
 
 	key := t.objectKey(remoteName)

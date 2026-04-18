@@ -334,8 +334,8 @@ func TestTelegramNotifier_ContextCancelled(t *testing.T) {
 
 	n := newTelegramNotifierWithBase("tok", "42", srv.URL, nil)
 	err := n.Notify(ctx, Event{Kind: EventStarted, JobID: "j1"})
-	if err == nil {
-		t.Error("Notify cancelled ctx error = nil, want non-nil")
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("Notify cancelled ctx error = %v, want context.Canceled", err)
 	}
 }
 

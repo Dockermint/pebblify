@@ -74,7 +74,7 @@ func TestShellQuote_NoUnquotedSpecialChars(t *testing.T) {
 func TestReadAck_ZeroByte(t *testing.T) {
 	t.Parallel()
 	r := bufio.NewReader(bytes.NewReader([]byte{0}))
-	if err := readAck(r); err != nil {
+	if err := readAck(context.Background(), r); err != nil {
 		t.Errorf("readAck(0x00) unexpected error: %v", err)
 	}
 }
@@ -85,7 +85,7 @@ func TestReadAck_WarningCode(t *testing.T) {
 	payload := []byte{1}
 	payload = append(payload, []byte("warning message\n")...)
 	r := bufio.NewReader(bytes.NewReader(payload))
-	err := readAck(r)
+	err := readAck(context.Background(), r)
 	if !errors.Is(err, ErrProtocol) {
 		t.Errorf("readAck(0x01) error = %v, want wrapping %v", err, ErrProtocol)
 	}
@@ -97,7 +97,7 @@ func TestReadAck_FatalCode(t *testing.T) {
 	payload := []byte{2}
 	payload = append(payload, []byte("fatal error\n")...)
 	r := bufio.NewReader(bytes.NewReader(payload))
-	err := readAck(r)
+	err := readAck(context.Background(), r)
 	if !errors.Is(err, ErrProtocol) {
 		t.Errorf("readAck(0x02) error = %v, want wrapping %v", err, ErrProtocol)
 	}
@@ -107,7 +107,7 @@ func TestReadAck_FatalCode(t *testing.T) {
 func TestReadAck_UnexpectedByte(t *testing.T) {
 	t.Parallel()
 	r := bufio.NewReader(bytes.NewReader([]byte{42}))
-	err := readAck(r)
+	err := readAck(context.Background(), r)
 	if !errors.Is(err, ErrProtocol) {
 		t.Errorf("readAck(0x2a) error = %v, want wrapping %v", err, ErrProtocol)
 	}
@@ -117,9 +117,24 @@ func TestReadAck_UnexpectedByte(t *testing.T) {
 func TestReadAck_EmptyReader(t *testing.T) {
 	t.Parallel()
 	r := bufio.NewReader(bytes.NewReader(nil))
-	err := readAck(r)
+	err := readAck(context.Background(), r)
 	if err == nil {
 		t.Error("readAck(empty reader) expected error, got nil")
+	}
+}
+
+// TestReadAck_CancelledContext returns ctx.Err when context is already cancelled.
+func TestReadAck_CancelledContext(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	// Use an io.Pipe reader so ReadByte blocks indefinitely, allowing ctx.Done to win.
+	pr, _ := io.Pipe()
+	defer func() { _ = pr.Close() }()
+	r := bufio.NewReader(pr)
+	err := readAck(ctx, r)
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("readAck(cancelled ctx) error = %v, want context.Canceled", err)
 	}
 }
 

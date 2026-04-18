@@ -139,10 +139,12 @@ func runDaemonLoop(loaded *config.Loaded, logger *slog.Logger) error {
 
 	errCh := startConcurrentServers(rootCtx, logger, services)
 
+	var srvErr error
 	select {
 	case <-rootCtx.Done():
 		logger.Info("shutdown signal received; draining")
 	case err := <-errCh:
+		srvErr = err
 		if err != nil {
 			logger.Error("sub-server exited with error; shutting down", "error", err)
 		} else {
@@ -155,7 +157,7 @@ func runDaemonLoop(loaded *config.Loaded, logger *slog.Logger) error {
 	defer shutdownCancel()
 
 	drainDaemon(shutdownCtx, logger, q, services)
-	return nil
+	return srvErr
 }
 
 // DaemonServices bundles every long-lived sub-server the daemon orchestrates.

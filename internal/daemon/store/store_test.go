@@ -39,7 +39,7 @@ func TestNew_LocalOnlyProducesOneTarget(t *testing.T) {
 		t.Fatalf("New() unexpected error: %v", err)
 	}
 	if len(targets) != 1 {
-		t.Errorf("len(targets) = %d, want 1", len(targets))
+		t.Fatalf("len(targets) = %d, want 1", len(targets))
 	}
 	if targets[0].Name() != "local" {
 		t.Errorf("targets[0].Name() = %q, want %q", targets[0].Name(), "local")

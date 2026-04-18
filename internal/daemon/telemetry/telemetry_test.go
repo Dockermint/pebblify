@@ -1,6 +1,7 @@
 package telemetry
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -243,18 +244,29 @@ func TestNew_Disabled_ReturnsNilNilNil(t *testing.T) {
 	}
 }
 
-// TestNew_Enabled_ReturnsServerAndCollectors builds a server and collectors.
-// Uses a non-conflicting port and immediately stops to avoid address-in-use.
+// TestNew_Enabled_ReturnsServerAndCollectors calls New() with telemetry enabled
+// and asserts the returned server and collectors are non-nil, then immediately
+// stops the server to avoid address-in-use errors in parallel tests.
 func TestNew_Enabled_ReturnsServerAndCollectors(t *testing.T) {
-	t.Parallel()
-
-	// Use a private Prometheus registry by temporarily registering against it.
-	// buildCollectors registers to the default registry; we call it directly
-	// then unregister to avoid polluting other tests.
-	cols, err := buildCollectors()
-	if err != nil {
-		t.Fatalf("buildCollectors() error = %v", err)
+	// Not parallel — mutates the global prometheus registry via New().
+	cfg := config.TelemetrySection{
+		Enable: true,
+		Host:   "127.0.0.1",
+		Port:   0, // Shutdown is called before Start so no bind occurs.
 	}
+
+	srv, cols, err := New(cfg, nil)
+	if err != nil {
+		t.Fatalf("New(enabled) error = %v", err)
+	}
+	if srv == nil {
+		t.Error("New(enabled) srv = nil, want non-nil")
+	}
+	if cols == nil {
+		t.Fatal("New(enabled) cols = nil, want non-nil")
+	}
+
+	// Unregister collectors to restore the global registry for other tests.
 	t.Cleanup(func() {
 		prometheus.Unregister(cols.JobsTotal)
 		prometheus.Unregister(cols.JobDuration)
@@ -263,8 +275,12 @@ func TestNew_Enabled_ReturnsServerAndCollectors(t *testing.T) {
 		prometheus.Unregister(cols.BytesUploaded)
 		prometheus.Unregister(cols.Active)
 	})
-	if cols == nil {
-		t.Fatal("buildCollectors() returned nil")
+
+	// Shutdown an unstarted http.Server returns nil immediately.
+	stopCtx, stopCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer stopCancel()
+	if stopErr := srv.Stop(stopCtx); stopErr != nil {
+		t.Errorf("srv.Stop() error = %v, want nil", stopErr)
 	}
 }
 

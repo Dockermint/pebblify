@@ -130,7 +130,7 @@ func (n *fakeNotifier) Notify(_ context.Context, ev notify.Event) error {
 func minimalConfig(t *testing.T) *config.Config {
 	t.Helper()
 	return &config.Config{
-		Convertion: config.ConvertionSection{
+		Conversion: config.ConversionSection{
 			TemporaryDirectory: t.TempDir(),
 		},
 		Save: config.SaveSection{
@@ -312,9 +312,11 @@ func TestRunner_Start_StopsOnQueueShutdown(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- r.Start(ctx) }()
 
-	shutCtx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	_ = fq.Shutdown(shutCtx)
+	shutCtx, shutCancel := context.WithTimeout(context.Background(), time.Second)
+	defer shutCancel()
+	if shutErr := fq.Shutdown(shutCtx); shutErr != nil {
+		t.Errorf("fq.Shutdown() error = %v, want nil", shutErr)
+	}
 
 	select {
 	case err := <-done:

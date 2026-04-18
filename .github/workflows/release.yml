@@ -1,5 +1,11 @@
 name: Release
 
+# Action version policy:
+# - anchore/sbom-action is pinned to a commit SHA (third-party, higher supply-chain risk).
+# - First-party actions/* and docker/* remain on major-version tags: GitHub's release
+#   channel guarantees supply-chain integrity for these publishers.
+# - Full SHA migration for all actions is deferred to v0.5.x via Renovate automation.
+
 on:
   push:
     tags: ["v*"]

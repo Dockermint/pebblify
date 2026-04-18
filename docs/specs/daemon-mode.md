@@ -157,7 +157,7 @@ enable = true
 host = "127.0.0.1"
 port = 2325
 
-[convertion]
+[conversion]
 temporary_directory = "/tmp"
 delete_source_snapshot = true
 
@@ -286,7 +286,7 @@ Request body (JSON):
 Validation:
 - `snapshot_url` must be a valid URL (scheme http or https).
 - Archive format is inferred from the URL file extension. Supported: `.tar`, `.tar.gz`, `.tar.lz4`, `.tar.zst`, `.zip`. Rejection if extension is unrecognized.
-- Daemon checks free disk space in `convertion.temporary_directory` before accepting the job. Minimum required: estimated archive size * 4 (download + extract + convert + repack). If insufficient, return 507 Insufficient Storage.
+- Daemon checks free disk space in `conversion.temporary_directory` before accepting the job. Minimum required: estimated archive size * 4 (download + extract + convert + repack). If insufficient, return 507 Insufficient Storage.
 - Dedup check: if the canonicalized URL matches a running or queued job, return 409 Conflict.
 - If daemon is shutting down, return 503.
 
@@ -340,18 +340,18 @@ The orchestrator processes one job at a time via the single worker goroutine. Jo
 
 ```
 Step 1: Dequeue job from FIFO queue (worker goroutine blocks until job available)
-Step 2: Validate free disk space in convertion.temporary_directory
-Step 3: Download archive to convertion.temporary_directory/<job_id>/download/<filename>
+Step 2: Validate free disk space in conversion.temporary_directory
+Step 3: Download archive to conversion.temporary_directory/<job_id>/download/<filename>
 Step 4: Extract archive; detect all LevelDB directories within the extracted tree
 Step 5: For each LevelDB directory: call internal/migration.RunLevelToPebble
         - Uses internal migration + verify packages; reuses existing RunConfig interface
         - No crash recovery in daemon mode (stateless per job)
-        - If convertion.delete_source_snapshot = true → remove source LevelDB dir after conversion
+        - If conversion.delete_source_snapshot = true → remove source LevelDB dir after conversion
 Step 6: Run internal/verify.Run on each converted DB (full verification; no sampling skip in daemon)
 Step 7: Repack entire output directory (converted PebbleDB dirs + non-DB files from original archive)
-        into convertion.temporary_directory/<job_id>/output/<original_name>_pebbledb_<unix_ts>.<ext>
+        into conversion.temporary_directory/<job_id>/output/<original_name>_pebbledb_<unix_ts>.<ext>
 Step 8: Upload output file to each enabled Storer (local, scp, s3) sequentially
-Step 9: Delete convertion.temporary_directory/<job_id>/ (both download and output)
+Step 9: Delete conversion.temporary_directory/<job_id>/ (both download and output)
 Step 10: Notify via Notifier (success or failure message) if notify.enable = true
 ```
 
@@ -373,7 +373,7 @@ Non-fatal error (single Storer failure, notification failure):
 Fatal error (download failure, extraction failure, conversion failure, all Storers fail):
 - Notify failure (if notify enabled).
 - Log at ERROR level to stderr.
-- Cleanup `convertion.temporary_directory/<job_id>/` completely.
+- Cleanup `conversion.temporary_directory/<job_id>/` completely.
 - Mark job failed.
 - Worker goroutine loops back to dequeue next job.
 - Daemon remains running; fatal error does NOT exit the daemon.

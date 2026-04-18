@@ -499,7 +499,9 @@ func TestFIFOQueue_DequeueShutdownRace(t *testing.T) {
 
 	q := New(Options{BufferSize: bufSize})
 
-	// Producer: enqueues distinct URLs as fast as possible.
+	// Producer: enqueues distinct URLs as fast as possible. Known expected
+	// errors (ErrQueueFull, ErrDuplicate, ErrShuttingDown) are silently ignored;
+	// any other error is a test failure.
 	var producerWG sync.WaitGroup
 	producerWG.Add(1)
 	go func() {
@@ -508,7 +510,13 @@ func TestFIFOQueue_DequeueShutdownRace(t *testing.T) {
 		deadline := time.Now().Add(testDuration)
 		for time.Now().Before(deadline) {
 			url := "https://example.com/" + string(rune('a'+i%26)) + "?" + string(rune('0'+i%10))
-			_ = q.Enqueue(Job{ID: "j", URL: url})
+			if err := q.Enqueue(Job{ID: "j", URL: url}); err != nil {
+				if errors.Is(err, ErrQueueFull) || errors.Is(err, ErrDuplicate) || errors.Is(err, ErrShuttingDown) {
+					i++
+					continue
+				}
+				t.Errorf("Enqueue() unexpected error = %v", err)
+			}
 			i++
 		}
 	}()

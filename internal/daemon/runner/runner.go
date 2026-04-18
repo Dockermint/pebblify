@@ -108,6 +108,7 @@ type jobRunner struct {
 
 	mu      sync.Mutex
 	stopped bool
+	cancel  context.CancelFunc
 	done    chan struct{}
 }
 
@@ -129,15 +130,24 @@ func New(deps Deps) Runner {
 	}
 }
 
-// Start implements Runner.
+// Start implements Runner. A child context is derived from ctx so Stop can
+// signal the blocked Dequeue call without waiting on the parent context
+// (which is typically the daemon-wide SIGTERM context that drainDaemon
+// replaces with a bounded shutdownCtx before calling Stop).
 func (r *jobRunner) Start(ctx context.Context) error {
 	defer close(r.done)
 
+	runCtx, cancel := context.WithCancel(ctx)
+	r.mu.Lock()
+	r.cancel = cancel
+	r.mu.Unlock()
+	defer cancel()
+
 	for {
-		if err := ctx.Err(); err != nil {
+		if err := runCtx.Err(); err != nil {
 			return nil
 		}
-		job, err := r.deps.Queue.Dequeue(ctx)
+		job, err := r.deps.Queue.Dequeue(runCtx)
 		if err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				return nil
@@ -148,12 +158,14 @@ func (r *jobRunner) Start(ctx context.Context) error {
 			return fmt.Errorf("%w: dequeue: %v", ErrFatal, err)
 		}
 
-		r.processJob(ctx, job)
+		r.processJob(runCtx, job)
 	}
 }
 
-// Stop implements Runner. The queue owns the actual shutdown gate; Stop just
-// waits for Start to return.
+// Stop implements Runner. It cancels the runner's internal context so the
+// blocked Dequeue call unblocks, then waits for Start to return. Callers
+// that hold a separate queue.Shutdown lifecycle should invoke that first so
+// the in-flight job is allowed to finish before Stop forces the loop to exit.
 func (r *jobRunner) Stop(ctx context.Context) error {
 	r.mu.Lock()
 	if r.stopped {
@@ -161,7 +173,12 @@ func (r *jobRunner) Stop(ctx context.Context) error {
 		return nil
 	}
 	r.stopped = true
+	cancel := r.cancel
 	r.mu.Unlock()
+
+	if cancel != nil {
+		cancel()
+	}
 
 	select {
 	case <-r.done:
@@ -305,7 +322,7 @@ type workspace struct {
 
 // prepareWorkspace creates <tmp>/<job_id>/{src,extracted,pebbledb,out,migration}.
 func (r *jobRunner) prepareWorkspace(jobID string) (*workspace, error) {
-	root := filepath.Join(r.deps.Cfg.Convertion.TemporaryDirectory, jobID)
+	root := filepath.Join(r.deps.Cfg.Conversion.TemporaryDirectory, jobID)
 	ws := &workspace{
 		root:         root,
 		srcDir:       filepath.Join(root, "src"),
@@ -360,9 +377,10 @@ func (r *jobRunner) ensureDiskBudget(root string, archiveSize int64) error {
 // filename derived from the hostname.
 func (r *jobRunner) download(ctx context.Context, logger *slog.Logger,
 	rawURL, dir string) (string, int64, error) {
+	redacted := redactedJobURL(rawURL)
 	basename := urlBasename(rawURL)
 	if basename == "" {
-		return "", 0, fmt.Errorf("invalid snapshot url %q: missing filename in path", rawURL)
+		return "", 0, fmt.Errorf("invalid snapshot url %s: missing filename in path", redacted)
 	}
 
 	dlCtx, cancel := context.WithTimeout(ctx, downloadTimeout)
@@ -370,16 +388,16 @@ func (r *jobRunner) download(ctx context.Context, logger *slog.Logger,
 
 	req, err := http.NewRequestWithContext(dlCtx, http.MethodGet, rawURL, nil)
 	if err != nil {
-		return "", 0, fmt.Errorf("build request: %w", err)
+		return "", 0, fmt.Errorf("build request for %s: %w", redacted, err)
 	}
 	resp, err := r.http.Do(req)
 	if err != nil {
-		return "", 0, fmt.Errorf("do request: %w", err)
+		return "", 0, fmt.Errorf("do request for %s: %w", redacted, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", 0, fmt.Errorf("http status %d", resp.StatusCode)
+		return "", 0, fmt.Errorf("http status %d for %s", resp.StatusCode, redacted)
 	}
 
 	dest := filepath.Join(dir, basename)
@@ -486,7 +504,7 @@ func (r *jobRunner) replaceDBTree(levelDir, pebbleDir string) error {
 	parent := filepath.Dir(levelDir)
 	target := filepath.Join(parent, filepath.Base(levelDir))
 
-	if r.deps.Cfg.Convertion.DeleteSourceSnapshot {
+	if r.deps.Cfg.Conversion.DeleteSourceSnapshot {
 		if err := os.RemoveAll(target); err != nil {
 			return fmt.Errorf("remove source leveldb tree %s: %w", target, err)
 		}

@@ -86,14 +86,37 @@ func TestExtension_AllModes(t *testing.T) {
 
 // ---- Compress + Extract round-trips ----
 
-// TestCompress_Extract_Roundtrip_None verifies plain tar round-trip.
+// assertFilesEqual compares two maps of relative-path -> content for exact
+// key and value equality, failing the test with descriptive messages on any
+// mismatch, missing file, or unexpected extra file.
+func assertFilesEqual(t *testing.T, got, want map[string]string) {
+	t.Helper()
+	for path, wantContent := range want {
+		gotContent, ok := got[path]
+		if !ok {
+			t.Errorf("missing file %q in extracted output", path)
+			continue
+		}
+		if gotContent != wantContent {
+			t.Errorf("file %q: content = %q, want %q", path, gotContent, wantContent)
+		}
+	}
+	for path := range got {
+		if _, ok := want[path]; !ok {
+			t.Errorf("unexpected extra file %q in extracted output", path)
+		}
+	}
+}
+
+// TestCompress_Extract_Roundtrip_None verifies plain tar round-trip with exact content.
 func TestCompress_Extract_Roundtrip_None(t *testing.T) {
 	t.Parallel()
-	src := t.TempDir()
-	buildDirTree(t, src, map[string]string{
+	want := map[string]string{
 		"a/file.txt": "hello",
 		"b/other":    "world",
-	})
+	}
+	src := t.TempDir()
+	buildDirTree(t, src, want)
 
 	archive := filepath.Join(t.TempDir(), "out.tar")
 	if err := Compress(context.Background(), src, archive, store.CompNone); err != nil {
@@ -103,17 +126,15 @@ func TestCompress_Extract_Roundtrip_None(t *testing.T) {
 	if err := Extract(context.Background(), archive, dst); err != nil {
 		t.Fatalf("Extract(none) error: %v", err)
 	}
-	got := collectFiles(t, dst)
-	if len(got) < 2 {
-		t.Errorf("Extract(none) got %d files, want >= 2", len(got))
-	}
+	assertFilesEqual(t, collectFiles(t, dst), want)
 }
 
-// TestCompress_Extract_Roundtrip_Gzip verifies tar.gz round-trip.
+// TestCompress_Extract_Roundtrip_Gzip verifies tar.gz round-trip with exact content.
 func TestCompress_Extract_Roundtrip_Gzip(t *testing.T) {
 	t.Parallel()
+	want := map[string]string{"data.bin": "binary content"}
 	src := t.TempDir()
-	buildDirTree(t, src, map[string]string{"data.bin": "binary content"})
+	buildDirTree(t, src, want)
 
 	archive := filepath.Join(t.TempDir(), "out.tar.gz")
 	if err := Compress(context.Background(), src, archive, store.CompGzip); err != nil {
@@ -123,17 +144,15 @@ func TestCompress_Extract_Roundtrip_Gzip(t *testing.T) {
 	if err := Extract(context.Background(), archive, dst); err != nil {
 		t.Fatalf("Extract(gzip) error: %v", err)
 	}
-	got := collectFiles(t, dst)
-	if len(got) == 0 {
-		t.Error("Extract(gzip) produced no files")
-	}
+	assertFilesEqual(t, collectFiles(t, dst), want)
 }
 
-// TestCompress_Extract_Roundtrip_Zstd verifies tar.zst round-trip.
+// TestCompress_Extract_Roundtrip_Zstd verifies tar.zst round-trip with exact content.
 func TestCompress_Extract_Roundtrip_Zstd(t *testing.T) {
 	t.Parallel()
+	want := map[string]string{"snap.db": "leveldb-payload"}
 	src := t.TempDir()
-	buildDirTree(t, src, map[string]string{"snap.db": "leveldb-payload"})
+	buildDirTree(t, src, want)
 
 	archive := filepath.Join(t.TempDir(), "out.tar.zst")
 	if err := Compress(context.Background(), src, archive, store.CompZstd); err != nil {
@@ -143,16 +162,15 @@ func TestCompress_Extract_Roundtrip_Zstd(t *testing.T) {
 	if err := Extract(context.Background(), archive, dst); err != nil {
 		t.Fatalf("Extract(zstd) error: %v", err)
 	}
-	if len(collectFiles(t, dst)) == 0 {
-		t.Error("Extract(zstd) produced no files")
-	}
+	assertFilesEqual(t, collectFiles(t, dst), want)
 }
 
-// TestCompress_Extract_Roundtrip_LZ4 verifies tar.lz4 round-trip.
+// TestCompress_Extract_Roundtrip_LZ4 verifies tar.lz4 round-trip with exact content.
 func TestCompress_Extract_Roundtrip_LZ4(t *testing.T) {
 	t.Parallel()
+	want := map[string]string{"snap.db": "leveldb-payload"}
 	src := t.TempDir()
-	buildDirTree(t, src, map[string]string{"snap.db": "leveldb-payload"})
+	buildDirTree(t, src, want)
 
 	archive := filepath.Join(t.TempDir(), "out.tar.lz4")
 	if err := Compress(context.Background(), src, archive, store.CompLZ4); err != nil {
@@ -162,19 +180,19 @@ func TestCompress_Extract_Roundtrip_LZ4(t *testing.T) {
 	if err := Extract(context.Background(), archive, dst); err != nil {
 		t.Fatalf("Extract(lz4) error: %v", err)
 	}
-	if len(collectFiles(t, dst)) == 0 {
-		t.Error("Extract(lz4) produced no files")
-	}
+	assertFilesEqual(t, collectFiles(t, dst), want)
 }
 
-// TestCompress_DirectoryStructurePreserved confirms nested dirs survive the round-trip.
+// TestCompress_DirectoryStructurePreserved confirms nested dirs survive the round-trip
+// with exact path and content equality.
 func TestCompress_DirectoryStructurePreserved(t *testing.T) {
 	t.Parallel()
-	src := t.TempDir()
-	buildDirTree(t, src, map[string]string{
+	want := map[string]string{
 		"dir/nested/deep.txt": "deep",
 		"root.txt":            "root",
-	})
+	}
+	src := t.TempDir()
+	buildDirTree(t, src, want)
 
 	archive := filepath.Join(t.TempDir(), "out.tar.gz")
 	if err := Compress(context.Background(), src, archive, store.CompGzip); err != nil {
@@ -184,16 +202,7 @@ func TestCompress_DirectoryStructurePreserved(t *testing.T) {
 	if err := Extract(context.Background(), archive, dst); err != nil {
 		t.Fatalf("Extract error: %v", err)
 	}
-	files := collectFiles(t, dst)
-	var found int
-	for k := range files {
-		if filepath.Base(k) == "deep.txt" || filepath.Base(k) == "root.txt" {
-			found++
-		}
-	}
-	if found < 2 {
-		t.Errorf("directory structure not preserved: found %d/2 files in %v", found, files)
-	}
+	assertFilesEqual(t, collectFiles(t, dst), want)
 }
 
 // ---- Compress error paths ----

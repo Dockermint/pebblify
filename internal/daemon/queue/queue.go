@@ -43,6 +43,17 @@ var defaultSchemePorts = map[string]string{
 	"sftp":  "22",
 }
 
+// allowedSchemes is the whitelist of URL schemes the daemon accepts as job
+// sources. Any other scheme (javascript, file, data, ...) is rejected at
+// canonicalization time so dangerous URLs never reach the runner.
+var allowedSchemes = map[string]struct{}{
+	"http":  {},
+	"https": {},
+	"ftp":   {},
+	"sftp":  {},
+	"ssh":   {},
+}
+
 // Job is a single conversion request accepted from the API.
 type Job struct {
 	// ID is a daemon-assigned opaque identifier (the API handler generates this,
@@ -367,6 +378,9 @@ func Canonicalize(rawURL string) (string, error) {
 	}
 
 	scheme := strings.ToLower(u.Scheme)
+	if _, ok := allowedSchemes[scheme]; !ok {
+		return "", fmt.Errorf("unsupported url scheme %q: allowed schemes are http, https, ftp, sftp, ssh", scheme)
+	}
 	host := strings.ToLower(u.Hostname())
 	port := u.Port()
 	if def, ok := defaultSchemePorts[scheme]; ok && port == def {

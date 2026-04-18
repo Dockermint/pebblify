@@ -96,7 +96,7 @@ type Config struct {
 	Notify     NotifySection     `toml:"notify"`
 	Telemetry  TelemetrySection  `toml:"telemetry"`
 	Health     HealthSection     `toml:"health"`
-	Convertion ConvertionSection `toml:"convertion"`
+	Conversion ConversionSection `toml:"conversion"`
 	Save       SaveSection       `toml:"save"`
 	Queue      QueueSection      `toml:"queue"`
 }
@@ -150,10 +150,8 @@ type HealthSection struct {
 	Port int `toml:"port"`
 }
 
-// ConvertionSection holds the [convertion] TOML section. The field name mirrors
-// the config file spelling and is intentionally kept to avoid a breaking
-// schema change.
-type ConvertionSection struct {
+// ConversionSection holds the [conversion] TOML section.
+type ConversionSection struct {
 	// TemporaryDirectory is the scratch directory for downloads, extraction,
 	// conversion and repacking.
 	TemporaryDirectory string `toml:"temporary_directory"`
@@ -321,11 +319,11 @@ func applyDefaults(cfg *Config) error {
 	}
 	cfg.Save.Local.LocalSaveDirectory = expanded
 
-	expandedTmp, err := expandHome(cfg.Convertion.TemporaryDirectory)
+	expandedTmp, err := expandHome(cfg.Conversion.TemporaryDirectory)
 	if err != nil {
-		return fmt.Errorf("expand convertion.temporary_directory: %w", err)
+		return fmt.Errorf("expand conversion.temporary_directory: %w", err)
 	}
-	cfg.Convertion.TemporaryDirectory = expandedTmp
+	cfg.Conversion.TemporaryDirectory = expandedTmp
 
 	return nil
 }
