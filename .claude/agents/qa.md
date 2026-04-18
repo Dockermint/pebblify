@@ -255,3 +255,5 @@ CTO delegates testing task
 - No emoji or unicode emulating emoji in test code.
 - 1 tab indent, 120-char line limit.
 - Mutation testing reveal untestable code patterns → report design issue to CTO for @software-architect.
+- Breaking-changes consumption: when CTO forwards breaking-changes list, scan + update all call sites FIRST via grep -r before writing new tests.
+- Report completeness gate: every report ends with Ready for commit: YES/NO marker. Truncation returns INCOMPLETE marker, never silent pass.
