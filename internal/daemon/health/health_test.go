@@ -27,6 +27,9 @@ func TestHandleLiveness_GET(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Errorf("handleLiveness GET = %d, want %d", rr.Code, http.StatusOK)
 	}
+	if body := rr.Body.String(); body != "ok\n" {
+		t.Errorf("handleLiveness GET body = %q, want %q", body, "ok\n")
+	}
 }
 
 // TestHandleLiveness_POST returns 405 Method Not Allowed.
@@ -53,6 +56,9 @@ func TestHandleReadiness_Ready(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Errorf("handleReadiness ready = %d, want %d", rr.Code, http.StatusOK)
 	}
+	if body := rr.Body.String(); body != "ok\n" {
+		t.Errorf("handleReadiness ready body = %q, want %q", body, "ok\n")
+	}
 }
 
 // TestHandleReadiness_NotReady returns 503 when provider reports not ready.
@@ -64,6 +70,9 @@ func TestHandleReadiness_NotReady(t *testing.T) {
 	s.handleReadiness(rr, req)
 	if rr.Code != http.StatusServiceUnavailable {
 		t.Errorf("handleReadiness not ready = %d, want %d", rr.Code, http.StatusServiceUnavailable)
+	}
+	if body := rr.Body.String(); body != "not ready\n" {
+		t.Errorf("handleReadiness not ready body = %q, want %q", body, "not ready\n")
 	}
 }
 

@@ -56,7 +56,7 @@ func writeTOML(t *testing.T, content string) string {
 	t.Helper()
 	dir := t.TempDir()
 	p := filepath.Join(dir, "config.toml")
-	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+	if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
 		t.Fatalf("write test config: %v", err)
 	}
 	return p
@@ -658,17 +658,39 @@ enable = false
 	}
 }
 
-// TestLoad_SCPValidAuthModes checks all three SCP auth modes.
+// TestLoad_SCPValidAuthModes checks all three SCP auth modes and asserts that
+// each mode correctly populates the corresponding secret field.
 func TestLoad_SCPValidAuthModes(t *testing.T) {
 	tests := []struct {
-		name    string
-		mode    string
-		envKey  string
-		envVal  string
+		name           string
+		mode           string
+		envKey         string
+		envVal         string
+		wantKeyPath    string
+		wantPassword   string
 	}{
-		{name: "key", mode: SCPAuthKey, envKey: EnvSCPKeyPath, envVal: "/tmp/id_rsa"},
-		{name: "password", mode: SCPAuthPassword, envKey: EnvSCPPassword, envVal: "pass"},
-		{name: "none", mode: SCPAuthNone, envKey: "", envVal: ""},
+		{
+			name:        "key",
+			mode:        SCPAuthKey,
+			envKey:      EnvSCPKeyPath,
+			envVal:      "/tmp/id_rsa",
+			wantKeyPath: "/tmp/id_rsa",
+		},
+		{
+			name:         "password",
+			mode:         SCPAuthPassword,
+			envKey:       EnvSCPPassword,
+			envVal:       "pass",
+			wantPassword: "pass",
+		},
+		{
+			name:         "none",
+			mode:         SCPAuthNone,
+			envKey:       "",
+			envVal:       "",
+			wantKeyPath:  "",
+			wantPassword: "",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -702,9 +724,16 @@ authentification_mode = "` + tt.mode + `"
 enable = false
 `
 			p := writeTOML(t, toml)
-			_, err := Load(p)
+			got, err := Load(p)
 			if err != nil {
 				t.Errorf("Load() scp mode=%q unexpected error: %v", tt.mode, err)
+				return
+			}
+			if got.Secrets.SCPKeyPath != tt.wantKeyPath {
+				t.Errorf("SCPKeyPath = %q, want %q", got.Secrets.SCPKeyPath, tt.wantKeyPath)
+			}
+			if got.Secrets.SCPPassword != tt.wantPassword {
+				t.Errorf("SCPPassword = %q, want %q", got.Secrets.SCPPassword, tt.wantPassword)
 			}
 		})
 	}
@@ -943,7 +972,7 @@ func TestExpandHome_Tilde(t *testing.T) {
 	t.Parallel()
 	home, err := os.UserHomeDir()
 	if err != nil {
-		t.Skip("home dir unavailable")
+		t.Fatalf("unable to get user home dir: %v", err)
 	}
 	tests := []struct {
 		input string

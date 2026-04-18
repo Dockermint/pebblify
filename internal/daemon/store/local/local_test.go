@@ -34,7 +34,10 @@ func TestNew_NonEmptyDirectorySucceeds(t *testing.T) {
 // TestLocalTarget_Name returns the const Name identifier.
 func TestLocalTarget_Name(t *testing.T) {
 	t.Parallel()
-	tgt, _ := New(config.LocalSaveSection{LocalSaveDirectory: "/some/dir"})
+	tgt, err := New(config.LocalSaveSection{LocalSaveDirectory: "/some/dir"})
+	if err != nil {
+		t.Fatalf("New() unexpected error: %v", err)
+	}
 	if got := tgt.Name(); got != Name {
 		t.Errorf("Name() = %q, want %q", got, Name)
 	}
@@ -44,12 +47,15 @@ func TestLocalTarget_Name(t *testing.T) {
 func TestLocalTarget_Upload_CancelledContext(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	tgt, _ := New(config.LocalSaveSection{LocalSaveDirectory: dir})
+	tgt, err := New(config.LocalSaveSection{LocalSaveDirectory: dir})
+	if err != nil {
+		t.Fatalf("New() unexpected error: %v", err)
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	err := tgt.Upload(ctx, "/any/path", "output.tar.lz4")
+	err = tgt.Upload(ctx, "/any/path", "output.tar.lz4")
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("Upload cancelled ctx error = %v, want context.Canceled", err)
 	}
@@ -59,8 +65,11 @@ func TestLocalTarget_Upload_CancelledContext(t *testing.T) {
 func TestLocalTarget_Upload_EmptyLocalPath(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	tgt, _ := New(config.LocalSaveSection{LocalSaveDirectory: dir})
-	err := tgt.Upload(context.Background(), "", "out.tar")
+	tgt, err := New(config.LocalSaveSection{LocalSaveDirectory: dir})
+	if err != nil {
+		t.Fatalf("New() unexpected error: %v", err)
+	}
+	err = tgt.Upload(context.Background(), "", "out.tar")
 	if err == nil {
 		t.Fatal("Upload(empty localPath) expected error, got nil")
 	}
@@ -70,12 +79,15 @@ func TestLocalTarget_Upload_EmptyLocalPath(t *testing.T) {
 func TestLocalTarget_Upload_EmptyRemoteName(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	tgt, _ := New(config.LocalSaveSection{LocalSaveDirectory: dir})
+	tgt, err := New(config.LocalSaveSection{LocalSaveDirectory: dir})
+	if err != nil {
+		t.Fatalf("New() unexpected error: %v", err)
+	}
 	src := filepath.Join(t.TempDir(), "src.tar")
 	if err := os.WriteFile(src, []byte("data"), 0o644); err != nil {
 		t.Fatalf("write src: %v", err)
 	}
-	err := tgt.Upload(context.Background(), src, "")
+	err = tgt.Upload(context.Background(), src, "")
 	if err == nil {
 		t.Fatal("Upload(empty remoteName) expected error, got nil")
 	}
@@ -94,7 +106,10 @@ func TestLocalTarget_Upload_SameDevice(t *testing.T) {
 		t.Fatalf("write src: %v", err)
 	}
 
-	tgt, _ := New(config.LocalSaveSection{LocalSaveDirectory: dstDir})
+	tgt, err := New(config.LocalSaveSection{LocalSaveDirectory: dstDir})
+	if err != nil {
+		t.Fatalf("New() unexpected error: %v", err)
+	}
 	if err := tgt.Upload(context.Background(), srcFile, "snap.tar.lz4"); err != nil {
 		t.Fatalf("Upload() error: %v", err)
 	}
@@ -122,7 +137,10 @@ func TestLocalTarget_Upload_CreatesDestDir(t *testing.T) {
 		t.Fatalf("write src: %v", err)
 	}
 
-	tgt, _ := New(config.LocalSaveSection{LocalSaveDirectory: dstDir})
+	tgt, err := New(config.LocalSaveSection{LocalSaveDirectory: dstDir})
+	if err != nil {
+		t.Fatalf("New() unexpected error: %v", err)
+	}
 	if err := tgt.Upload(context.Background(), srcFile, "snap.tar"); err != nil {
 		t.Fatalf("Upload() error: %v", err)
 	}
@@ -136,10 +154,55 @@ func TestLocalTarget_Upload_CreatesDestDir(t *testing.T) {
 func TestLocalTarget_Upload_MissingSourceFile(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	tgt, _ := New(config.LocalSaveSection{LocalSaveDirectory: dir})
-	err := tgt.Upload(context.Background(), "/nonexistent/file.tar", "out.tar")
+	tgt, err := New(config.LocalSaveSection{LocalSaveDirectory: dir})
+	if err != nil {
+		t.Fatalf("New() unexpected error: %v", err)
+	}
+	err = tgt.Upload(context.Background(), "/nonexistent/file.tar", "out.tar")
 	if err == nil {
 		t.Fatal("Upload(missing src) expected error, got nil")
+	}
+}
+
+// TestLocalTarget_Upload_SourcePreserved verifies that after a successful Upload
+// the original source file is still present (copy semantics — source is never
+// removed by Upload).
+func TestLocalTarget_Upload_SourcePreserved(t *testing.T) {
+	t.Parallel()
+	srcDir := t.TempDir()
+	dstDir := t.TempDir()
+
+	srcFile := filepath.Join(srcDir, "snap.tar.lz4")
+	content := []byte("snapshot payload")
+	if err := os.WriteFile(srcFile, content, 0o644); err != nil {
+		t.Fatalf("write src: %v", err)
+	}
+
+	tgt, err := New(config.LocalSaveSection{LocalSaveDirectory: dstDir})
+	if err != nil {
+		t.Fatalf("New() unexpected error: %v", err)
+	}
+	if err := tgt.Upload(context.Background(), srcFile, "snap.tar.lz4"); err != nil {
+		t.Fatalf("Upload() error: %v", err)
+	}
+
+	// Destination must have the file.
+	if _, statErr := os.Stat(filepath.Join(dstDir, "snap.tar.lz4")); statErr != nil {
+		t.Errorf("dst file missing after Upload: %v", statErr)
+	}
+
+	// Source must still exist — Upload uses copy semantics, not move.
+	if _, statErr := os.Stat(srcFile); statErr != nil {
+		t.Errorf("source file was removed by Upload (copy semantics violated): %v", statErr)
+	}
+
+	// Source content must be intact.
+	got, readErr := os.ReadFile(srcFile)
+	if readErr != nil {
+		t.Fatalf("read src after Upload: %v", readErr)
+	}
+	if string(got) != string(content) {
+		t.Errorf("source content = %q after Upload, want %q", got, content)
 	}
 }
 

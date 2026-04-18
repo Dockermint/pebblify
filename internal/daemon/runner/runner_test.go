@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -14,19 +15,30 @@ import (
 
 // ---- fakes ----
 
-// fakeQueue implements queue.Queue backed by a channel.
+// fakeQueue implements queue.Queue backed by a channel with mutex-protected fields.
+// dequeuing is the only blocking operation; all other state mutations are guarded
+// by mu so concurrent runner access under -race is safe.
 type fakeQueue struct {
+	mu      sync.Mutex
 	jobs    chan queue.Job
 	current *queue.Job
 	depth   int
 	closed  bool
+	// blocking is closed once Dequeue has blocked on the channel, signalling
+	// that the worker goroutine has reached the wait point.
+	blocking chan struct{}
 }
 
 func newFakeQueue(buf int) *fakeQueue {
-	return &fakeQueue{jobs: make(chan queue.Job, buf)}
+	return &fakeQueue{
+		jobs:     make(chan queue.Job, buf),
+		blocking: make(chan struct{}),
+	}
 }
 
 func (q *fakeQueue) Enqueue(job queue.Job) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
 	if q.closed {
 		return queue.ErrShuttingDown
 	}
@@ -40,6 +52,12 @@ func (q *fakeQueue) Enqueue(job queue.Job) error {
 }
 
 func (q *fakeQueue) Dequeue(ctx context.Context) (queue.Job, error) {
+	// Signal once that we have reached the blocking point.
+	select {
+	case <-q.blocking:
+	default:
+		close(q.blocking)
+	}
 	select {
 	case <-ctx.Done():
 		return queue.Job{}, ctx.Err()
@@ -47,25 +65,38 @@ func (q *fakeQueue) Dequeue(ctx context.Context) (queue.Job, error) {
 		if !ok {
 			return queue.Job{}, queue.ErrShuttingDown
 		}
+		q.mu.Lock()
 		if q.depth > 0 {
 			q.depth--
 		}
 		jobCopy := job
 		q.current = &jobCopy
+		q.mu.Unlock()
 		return job, nil
 	}
 }
 
-func (q *fakeQueue) Depth() int             { return q.depth }
-func (q *fakeQueue) Contains(_ string) bool  { return false }
+func (q *fakeQueue) Depth() int {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return q.depth
+}
+
+func (q *fakeQueue) Contains(_ string) bool { return false }
+
 func (q *fakeQueue) Current() *queue.Job {
+	q.mu.Lock()
+	defer q.mu.Unlock()
 	if q.current == nil {
 		return nil
 	}
 	c := *q.current
 	return &c
 }
+
 func (q *fakeQueue) Shutdown(_ context.Context) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
 	if q.closed {
 		return nil
 	}
@@ -73,7 +104,19 @@ func (q *fakeQueue) Shutdown(_ context.Context) error {
 	close(q.jobs)
 	return nil
 }
-func (q *fakeQueue) CompleteCurrent() { q.current = nil }
+
+func (q *fakeQueue) CompleteCurrent() {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.current = nil
+}
+
+// waitBlocking blocks until the fakeQueue's Dequeue has started blocking on
+// the channel (i.e. the worker is alive and waiting for a job). This removes
+// the need for time.Sleep in tests.
+func (q *fakeQueue) waitBlocking() {
+	<-q.blocking
+}
 
 // fakeNotifier records Notify calls.
 type fakeNotifier struct {
@@ -299,8 +342,8 @@ func TestRunner_Stop_AfterContextCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() { _ = r.Start(ctx) }()
 
-	// Give Start a moment to block on Dequeue.
-	time.Sleep(10 * time.Millisecond)
+	// Wait until the worker is deterministically blocked on Dequeue before cancelling.
+	fq.waitBlocking()
 	cancel()
 
 	stopCtx, stopCancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -322,12 +365,15 @@ func TestRunner_Stop_Idempotent(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() { _ = r.Start(ctx) }()
-	time.Sleep(10 * time.Millisecond)
+	// Wait until the worker is deterministically blocked on Dequeue.
+	fq.waitBlocking()
 	cancel()
 
 	stopCtx, stopCancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer stopCancel()
-	_ = r.Stop(stopCtx)
+	if err := r.Stop(stopCtx); err != nil {
+		t.Errorf("first Stop() error = %v", err)
+	}
 	if err := r.Stop(stopCtx); err != nil {
 		t.Errorf("second Stop() error = %v", err)
 	}

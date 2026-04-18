@@ -5,8 +5,6 @@ import (
 	"context"
 	"errors"
 	"io"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -124,7 +122,9 @@ func TestS3Target_Upload_EmptyRemoteName(t *testing.T) {
 	m := &mockUploader{}
 	tgt := newTestS3Target("b", "", m)
 	src := filepath.Join(t.TempDir(), "src.tar")
-	_ = os.WriteFile(src, []byte("x"), 0o644)
+	if err := os.WriteFile(src, []byte("x"), 0o644); err != nil {
+		t.Fatalf("write src: %v", err)
+	}
 	err := tgt.Upload(context.Background(), src, "")
 	if err == nil {
 		t.Fatal("Upload(empty remoteName) expected error, got nil")
@@ -176,7 +176,9 @@ func TestS3Target_Upload_PropagatesPutError(t *testing.T) {
 	tgt := newTestS3Target("b", "", m)
 
 	src := filepath.Join(t.TempDir(), "snap.tar")
-	_ = os.WriteFile(src, []byte("data"), 0o644)
+	if err := os.WriteFile(src, []byte("data"), 0o644); err != nil {
+		t.Fatalf("write src: %v", err)
+	}
 
 	err := tgt.Upload(context.Background(), src, "snap.tar")
 	if !errors.Is(err, putErr) {
@@ -228,35 +230,11 @@ func TestNew_EmptySecretKey(t *testing.T) {
 	}
 }
 
-// ---- httptest.Server S3 mock ----
-
-// TestS3Target_Upload_ViaHTTPTestServer performs a round-trip against a fake S3 endpoint.
-// This exercises the real aws-sdk-go-v2 PutObject path end-to-end through HTTP.
-func TestS3Target_Upload_ViaHTTPTestServer(t *testing.T) {
+// TestS3Target_Upload_MockUploader verifies that Upload sets ContentLength correctly
+// and calls PutObject with the expected key when a prefix is configured.
+func TestS3Target_Upload_MockUploader(t *testing.T) {
 	t.Parallel()
 
-	var receivedBody []byte
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPut {
-			w.WriteHeader(http.StatusMethodNotAllowed)
-			return
-		}
-		body, _ := io.ReadAll(r.Body)
-		receivedBody = body
-		w.Header().Set("ETag", `"abc123"`)
-		w.WriteHeader(http.StatusOK)
-	}))
-	t.Cleanup(srv.Close)
-
-	// We use the mock uploader path instead because wiring a custom endpoint into the
-	// real aws s3 client requires BaseEndpoint override and region tricks that
-	// vary by SDK version — which would be testing the SDK, not our code.
-	// The httptest server above demonstrates the fake-server approach; the real
-	// upload path is covered by TestS3Target_Upload_HappyPath via the mock uploader.
-	_ = srv
-	_ = receivedBody
-
-	// Verify the mock uploader approach sends correct content length.
 	m := &mockUploader{}
 	tgt := newTestS3Target("testbucket", "", m)
 	content := bytes.Repeat([]byte("x"), 1024)

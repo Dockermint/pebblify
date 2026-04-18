@@ -19,13 +19,15 @@ import (
 // TestNoopNotifier_AlwaysReturnsNil verifies the noop always succeeds.
 func TestNoopNotifier_AlwaysReturnsNil(t *testing.T) {
 	t.Parallel()
-	n := NoopNotifier{}
-	err := n.Notify(context.Background(), Event{
+	n, err := New(config.NotifySection{Enable: false}, config.Secrets{})
+	if err != nil {
+		t.Fatalf("New(disabled) error = %v", err)
+	}
+	if err := n.Notify(context.Background(), Event{
 		Kind:  EventStarted,
 		JobID: "id1",
-	})
-	if err != nil {
-		t.Errorf("NoopNotifier.Notify() error = %v, want nil", err)
+	}); err != nil {
+		t.Errorf("noopNotifier.Notify() error = %v, want nil", err)
 	}
 }
 
@@ -96,15 +98,15 @@ func TestRenderMessage_IncludesErrorForFailed(t *testing.T) {
 
 // ---- New factory ----
 
-// TestNew_DisabledReturnsNoop returns a NoopNotifier when enable = false.
+// TestNew_DisabledReturnsNoop returns a noopNotifier when enable = false.
 func TestNew_DisabledReturnsNoop(t *testing.T) {
 	t.Parallel()
 	n, err := New(config.NotifySection{Enable: false}, config.Secrets{})
 	if err != nil {
 		t.Fatalf("New(disabled) error = %v", err)
 	}
-	if _, ok := n.(NoopNotifier); !ok {
-		t.Errorf("New(disabled) returned %T, want NoopNotifier", n)
+	if _, ok := n.(noopNotifier); !ok {
+		t.Errorf("New(disabled) returned %T, want noopNotifier", n)
 	}
 }
 
