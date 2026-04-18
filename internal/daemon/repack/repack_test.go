@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
@@ -487,5 +488,160 @@ func TestExtract_GzipCorrupt(t *testing.T) {
 	err := Extract(context.Background(), archive, t.TempDir())
 	if err == nil {
 		t.Error("Extract(corrupt gzip) expected error, got nil")
+	}
+}
+
+// ---- Symlink security (CodeQL fix coverage) ----
+
+// buildSymlinkTar writes an in-memory tar with a single TypeSymlink entry and
+// saves it to t.TempDir(). entryName is the archive path of the link;
+// linkname is the Linkname field (the symlink target).
+func buildSymlinkTar(t *testing.T, entryName, linkname string) string {
+	t.Helper()
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	hdr := &tar.Header{
+		Name:     entryName,
+		Typeflag: tar.TypeSymlink,
+		Linkname: linkname,
+		Mode:     0o777,
+	}
+	if err := tw.WriteHeader(hdr); err != nil {
+		t.Fatalf("buildSymlinkTar: write header: %v", err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatalf("buildSymlinkTar: close: %v", err)
+	}
+	out := filepath.Join(t.TempDir(), "symlink.tar")
+	if err := os.WriteFile(out, buf.Bytes(), 0o644); err != nil {
+		t.Fatalf("buildSymlinkTar: write file: %v", err)
+	}
+	return out
+}
+
+// TestExtract_SymlinkRejected is a table-driven test for symlink tar entries
+// that must be rejected with ErrUnsafePath. Each case also asserts that no
+// file named by the last element of the entry path was created in destDir.
+func TestExtract_SymlinkRejected(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		entryName string
+		linkname  string
+	}{
+		{
+			name:      "absolute target rejected",
+			entryName: "evil",
+			linkname:  "/etc/passwd",
+		},
+		{
+			name:      "relative escape rejected",
+			entryName: "evil",
+			linkname:  "../../../etc/passwd",
+		},
+		{
+			name:      "deep relative escape rejected",
+			entryName: "a/b/evil",
+			linkname:  "../../../../outside",
+		},
+		{
+			name:      "empty target rejected",
+			entryName: "evil",
+			linkname:  "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			archive := buildSymlinkTar(t, tt.entryName, tt.linkname)
+			dst := t.TempDir()
+
+			err := Extract(context.Background(), archive, dst)
+
+			if !errors.Is(err, ErrUnsafePath) {
+				t.Errorf("Extract() error = %v, want errors.Is(err, ErrUnsafePath)", err)
+			}
+			// The symlink must not have been created anywhere inside dst.
+			base := filepath.Base(tt.entryName)
+			created := filepath.Join(dst, base)
+			if _, statErr := os.Lstat(created); statErr == nil {
+				t.Errorf("Extract() created symlink %s despite ErrUnsafePath", created)
+			}
+		})
+	}
+}
+
+// TestExtract_SymlinkSafeRelativeAccepted verifies that a symlink whose
+// resolved target stays inside destDir is accepted and the symlink is created
+// with the exact linkname stored in the archive.
+//
+// Entry: "a/evil", Linkname: "../b/c"
+// Resolved: <dst>/a/../b/c = <dst>/b/c — inside dst, so valid.
+func TestExtract_SymlinkSafeRelativeAccepted(t *testing.T) {
+	t.Parallel()
+	archive := buildSymlinkTar(t, "a/evil", "../b/c")
+	dst := t.TempDir()
+
+	// Create the parent directory so MkdirAll inside writeTarEntry succeeds.
+	if err := os.MkdirAll(filepath.Join(dst, "a"), 0o755); err != nil {
+		t.Fatalf("mkdir dst/a: %v", err)
+	}
+
+	err := Extract(context.Background(), archive, dst)
+	if err != nil {
+		t.Fatalf("Extract() unexpected error: %v", err)
+	}
+
+	symlinkPath := filepath.Join(dst, "a", "evil")
+	target, readErr := os.Readlink(symlinkPath)
+	if readErr != nil {
+		t.Fatalf("Readlink(%s): %v — symlink was not created", symlinkPath, readErr)
+	}
+	if target != "../b/c" {
+		t.Errorf("symlink target = %q, want %q", target, "../b/c")
+	}
+}
+
+// TestExtract_ZipSymlinkRejected verifies that a zip entry with the
+// fs.ModeSymlink bit set in its Mode field is rejected with ErrUnsafePath.
+func TestExtract_ZipSymlinkRejected(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	// zip.FileHeader.SetMode propagates the Unix mode bits including the
+	// symlink type bits into the ExternalAttrs field, which zip.File.Mode()
+	// reads back.
+	fh := &zip.FileHeader{
+		Name:   "evil-link",
+		Method: zip.Store,
+	}
+	fh.SetMode(fs.ModeSymlink | 0o777)
+	w, err := zw.CreateHeader(fh)
+	if err != nil {
+		t.Fatalf("zip CreateHeader: %v", err)
+	}
+	// Body is the symlink target — the guard must fire before reading it.
+	if _, err := io.WriteString(w, "/etc/passwd"); err != nil {
+		t.Fatalf("zip write body: %v", err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("zip close: %v", err)
+	}
+
+	archive := filepath.Join(t.TempDir(), "symlink.zip")
+	if err := os.WriteFile(archive, buf.Bytes(), 0o644); err != nil {
+		t.Fatalf("write zip: %v", err)
+	}
+
+	dst := t.TempDir()
+	extractErr := Extract(context.Background(), archive, dst)
+	if !errors.Is(extractErr, ErrUnsafePath) {
+		t.Errorf("Extract(zip symlink) error = %v, want errors.Is(err, ErrUnsafePath)", extractErr)
+	}
+
+	// The symlink must not have been materialised inside dst.
+	if _, statErr := os.Lstat(filepath.Join(dst, "evil-link")); statErr == nil {
+		t.Errorf("Extract(zip symlink) created evil-link in dst despite ErrUnsafePath")
 	}
 }

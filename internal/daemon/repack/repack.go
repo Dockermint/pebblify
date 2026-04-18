@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -418,6 +419,9 @@ func writeTarEntry(tr *tar.Reader, hdr *tar.Header, destDir string) error {
 		}
 		return nil
 	case tar.TypeSymlink:
+		if err := validateSymlinkTarget(destDir, target, hdr.Linkname); err != nil {
+			return err
+		}
 		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 			return fmt.Errorf("repack extract: mkdir parent %s: %w", target, err)
 		}
@@ -446,8 +450,16 @@ func extractZip(ctx context.Context, archivePath, destDir string) error {
 	return nil
 }
 
-// writeZipEntry materializes a single zip entry under destDir.
+// writeZipEntry materializes a single zip entry under destDir. Symlink
+// entries (identified by fs.ModeSymlink in the zip mode field) are rejected
+// with ErrUnsafePath: the Compress path never emits zip symlinks, and
+// accepting untrusted symlinks would reopen the traversal vector closed in
+// the tar path.
 func writeZipEntry(entry *zip.File, destDir string) error {
+	if entry.Mode()&fs.ModeSymlink != 0 {
+		return fmt.Errorf("%w: zip entry %s is a symlink", ErrUnsafePath, entry.Name)
+	}
+
 	target, err := safeJoin(destDir, entry.Name)
 	if err != nil {
 		return err
@@ -482,12 +494,47 @@ func writeZipEntry(entry *zip.File, destDir string) error {
 func safeJoin(root, name string) (string, error) {
 	cleaned := filepath.Clean("/" + name)
 	joined := filepath.Join(root, cleaned)
-	rel, err := filepath.Rel(root, joined)
-	if err != nil {
-		return "", fmt.Errorf("%w: rel %s: %v", ErrUnsafePath, name, err)
-	}
-	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+	if err := containsPath(root, joined); err != nil {
 		return "", fmt.Errorf("%w: %s", ErrUnsafePath, name)
 	}
 	return joined, nil
+}
+
+// containsPath reports whether candidate resolves inside root. It returns a
+// non-nil error when candidate equals root's parent or lies outside root.
+// The check is lexical (no filesystem resolution); callers that need to
+// follow existing symlinks should resolve the path first.
+func containsPath(root, candidate string) error {
+	rel, err := filepath.Rel(root, candidate)
+	if err != nil {
+		return fmt.Errorf("rel %s: %w", candidate, err)
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("path %s escapes root %s", candidate, root)
+	}
+	return nil
+}
+
+// validateSymlinkTarget rejects symlink targets that would let the extracted
+// archive point outside destDir. Absolute targets are refused outright;
+// relative targets are resolved against the symlink's own directory (POSIX
+// semantics) and must remain under destDir after lexical cleaning.
+//
+// The check is lexical: it does not follow pre-existing symlinks on the
+// filesystem. Callers that extract into a directory containing attacker-
+// controlled symlinks must sanitise destDir itself beforehand.
+func validateSymlinkTarget(destDir, linkPath, linkname string) error {
+	if linkname == "" {
+		return fmt.Errorf("%w: symlink %s has empty target", ErrUnsafePath, linkPath)
+	}
+	if filepath.IsAbs(linkname) {
+		return fmt.Errorf("%w: symlink %s has absolute target %s",
+			ErrUnsafePath, linkPath, linkname)
+	}
+	resolved := filepath.Clean(filepath.Join(filepath.Dir(linkPath), linkname))
+	if err := containsPath(destDir, resolved); err != nil {
+		return fmt.Errorf("%w: symlink %s escapes destination via %s",
+			ErrUnsafePath, linkPath, linkname)
+	}
+	return nil
 }
