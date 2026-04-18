@@ -134,7 +134,8 @@ install-systemd-daemon:
 	@echo "Installation complete. Next steps:"
 	@echo "  1. Edit /etc/pebblify/.env — fill in all PEBBLIFY_* secrets"
 	@echo "  2. Review /etc/pebblify/config.toml and adjust as needed"
-	@echo "  3. Enable + start: systemctl enable --now pebblify"
+	@echo "  3. Run: systemctl daemon-reload"
+	@echo "  4. Enable + start: systemctl enable --now pebblify"
 
 # install: retained as alias for install-cli (backward compat).
 .PHONY: install
