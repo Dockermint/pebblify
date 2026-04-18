@@ -1,0 +1,72 @@
+[Unit]
+Description=Pebblify Daemon — LevelDB to PebbleDB migration service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pebblify
+Group=pebblify
+
+ExecStart=/usr/local/bin/pebblify daemon
+
+# Secrets and runtime configuration — copy from systemd/pebblify.env.example
+# The leading dash suppresses the error if the file does not exist yet.
+EnvironmentFile=-/etc/pebblify/.env
+
+Restart=on-failure
+RestartSec=5
+
+# ---------------------------------------------------------------------------
+# Systemd sandboxing hardening
+# ---------------------------------------------------------------------------
+
+# Prevent the process from gaining new privileges via setuid/setgid.
+NoNewPrivileges=true
+
+# Give the service its own private /tmp, isolated from the host and other units.
+PrivateTmp=true
+
+# Mount /usr, /boot, and /etc read-only; the daemon only writes to
+# /var/lib/pebblify and /tmp/pebblify (see ReadWritePaths below).
+ProtectSystem=strict
+
+# Block access to /home, /root, and /run/user entirely.
+ProtectHome=true
+
+# Paths the daemon must write to: snapshot output and conversion workspace.
+ReadWritePaths=/var/lib/pebblify /tmp/pebblify
+
+# Prevent writes to kernel tunables (/proc/sys, /sys).
+ProtectKernelTunables=true
+
+# Prevent loading or unloading kernel modules.
+ProtectKernelModules=true
+
+# Prevent writes to cgroup hierarchies.
+ProtectControlGroups=true
+
+# Allow only the address families the daemon actually uses:
+#   AF_INET / AF_INET6  — outbound HTTP downloads, API server, Prometheus, health listener
+#   AF_UNIX             — internal Go runtime and optional local socket comms
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+# Prevent the process from changing its execution domain (personality syscall).
+LockPersonality=true
+
+# Block executable memory mappings (JIT is not used; Go does not require W^X bypass).
+MemoryDenyWriteExecute=true
+
+# Prevent the process from acquiring real-time scheduling priority.
+RestrictRealtime=true
+
+# Reject any syscall ABI other than the native one (blocks 32-bit compat layers).
+SystemCallArchitectures=native
+
+# Allow only the syscall group required by well-behaved system services.
+# @system-service covers file I/O, networking, threading, and process management
+# without permitting dangerous capabilities such as ptrace or module loading.
+SystemCallFilter=@system-service
+
+[Install]
+WantedBy=multi-user.target
