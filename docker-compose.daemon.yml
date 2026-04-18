@@ -30,15 +30,16 @@ services:
       - ./config.toml:/etc/pebblify/config.toml:ro
       # Converted snapshot output — named volume for portability and data durability
       - pebblify_snapshots:/var/lib/pebblify/snapshots
-      # Conversion workspace — ephemeral, shared with host for post-mortem inspection
-      - /tmp/pebblify:/tmp/pebblify
+      # Conversion workspace — ephemeral named volume; avoids host /tmp exposure
+      - pebblify-tmp:/tmp/pebblify
+    # Ports bound to loopback. To expose publicly, edit or run behind a reverse proxy.
     ports:
       # Prometheus / telemetry — un-publish if not scraping from this host
-      - "2323:2323"
+      - "127.0.0.1:2323:2323"
       # REST API — un-publish and front with a reverse proxy in production
-      - "2324:2324"
+      - "127.0.0.1:2324:2324"
       # Health probes (liveness + readiness) — keep published for orchestrator checks
-      - "2325:2325"
+      - "127.0.0.1:2325:2325"
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:2325/healthz"]
       interval: 30s
@@ -57,6 +58,7 @@ services:
 
 volumes:
   pebblify_snapshots:
+  pebblify-tmp:
 
 networks:
   pebblify_net:
