@@ -58,9 +58,6 @@ EXPOSE 8086 9090
 # Daemon: Prometheus/telemetry (2323), REST API (2324), Health (2325)
 EXPOSE 2323 2324 2325
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD wget -q --spider http://127.0.0.1:2325/healthz || exit 1
-
 USER 10000:10000
 
 ENTRYPOINT ["pebblify"]

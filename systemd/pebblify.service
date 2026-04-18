@@ -34,6 +34,11 @@ ProtectSystem=strict
 # Block access to /home, /root, and /run/user entirely.
 ProtectHome=true
 
+# Allow the daemon to read /etc/pebblify (config, known_hosts) even though
+# ProtectSystem=strict makes /etc read-only globally. ReadOnlyPaths takes
+# precedence and explicitly re-exposes the directory without write access.
+ReadOnlyPaths=/etc/pebblify
+
 # Paths the daemon must write to: snapshot output and conversion workspace.
 ReadWritePaths=/var/lib/pebblify /tmp/pebblify
 
