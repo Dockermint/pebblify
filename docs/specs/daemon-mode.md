@@ -82,6 +82,12 @@ type Notifier interface {
 
 Implementations: `TelegramNotifier`, `NoopNotifier`.
 
+**`TelegramNotifier` implementation** (`internal/daemon/notify/telegram.go`):
+- Uses `net/http.Client` directly against `https://api.telegram.org/bot<token>/sendMessage`. No third-party Telegram library.
+- Inputs: `PEBBLIFY_TELEGRAM_BOT_TOKEN` env var (bot token) + `notify.channel_id` config field (chat ID). Both are required when `notify.enable = true` and `notify.mode = "telegram"`; missing either is a fatal startup error.
+- Retry policy: on HTTP 5xx response, retry once after an exponential backoff interval (base 2 s, factor 2). On HTTP 4xx response, log at ERROR level and return immediately (permanent failure — no retry). Notification failure is non-fatal to the job pipeline: the worker logs the error and continues.
+- The bot token is never logged. Log lines reference only the chat ID and HTTP status code.
+
 **Extension path**: to add a new backend (webhook, Slack, PagerDuty) in a future release:
 1. Create a new file in `internal/daemon/notify/` implementing `Notifier`.
 2. Add a new enum value to `config.notify.mode`.
@@ -594,10 +600,10 @@ Existing cases (`level-to-pebble`, `recover`, `verify`, `completion`) are not mo
 | :------------------------- | :------------------------------------------------------- | :------------- | :------------- |
 | TOML parsing               | `github.com/BurntSushi/toml` v1.x                        | `@lead-dev`    | Pending eval   |
 | S3 uploads                 | `github.com/aws/aws-sdk-go-v2/config` + `credentials` + `service/s3` | `@lead-dev` | **CEO confirmed** — only these 3 sub-modules |
-| Telegram notify            | `github.com/go-telegram-bot-api/telegram-bot-api/v5`     | `@lead-dev`    | Pending eval   |
+| Telegram notify            | `net/http` + `encoding/json` (stdlib only)               | `@lead-dev`    | **CEO locked** — no third-party lib; `go-telegram-bot-api/v5` rejected (abandoned, last release 2021-12-13) |
 | SCP / SSH transport        | `golang.org/x/crypto/ssh`                                | `@lead-dev`    | Pending eval   |
 
-The `aws-sdk-go-v2` fallback (hand-rolled SigV4) is removed from scope; CEO confirmed the library. For Telegram, if `@lead-dev` rejects `go-telegram-bot-api`, the fallback is raw Telegram Bot API over `net/http` with `encoding/json`. Zero additional deps.
+The `aws-sdk-go-v2` fallback (hand-rolled SigV4) is removed from scope; CEO confirmed the library. Telegram implementation uses `net/http` + `encoding/json` (stdlib only); `go-telegram-bot-api/v5` is rejected as abandoned. Zero additional deps for notification.
 
 ---
 
@@ -605,7 +611,7 @@ The `aws-sdk-go-v2` fallback (hand-rolled SigV4) is removed from scope; CEO conf
 
 | Agent               | Scope files                                                                             | Action                                                    |
 | :------------------ | :-------------------------------------------------------------------------------------- | :-------------------------------------------------------- |
-| `@lead-dev`         | `go.mod`, `go.sum`, `Makefile`                                                          | Add deps (3 aws sub-modules only); add install-cli, install-systemd-daemon (Linux-only) |
+| `@lead-dev`         | `go.mod`, `go.sum`, `Makefile`                                                          | Add deps (3 aws sub-modules + x/crypto only; no Telegram lib); add install-cli, install-systemd-daemon (Linux-only) |
 | `@go-developer`     | `internal/daemon/**/*.go`, `cmd/pebblify/main.go`                                       | Implement all packages and CLI wiring; add linux build tag to daemon.go |
 | `@container-engineer` | `docker-compose.daemon.yml`, `systemd/pebblify.service`, `systemd/pebblify.env.example` | Produce compose file + systemd unit + env stub (pending CLAUDE.md scope amendment) |
 | `@qa`               | `internal/daemon/**/*_test.go`                                                          | Unit + integration tests; mutation testing                |
