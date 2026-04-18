@@ -93,15 +93,22 @@ func validateRemoteName(remoteName string) error {
 
 // copyFileAtomic writes src to a sibling temp file of dst, fsyncs, closes,
 // then atomically renames the temp onto dst. On any error the temp file is
-// removed so no partial output is ever visible.
-func copyFileAtomic(ctx context.Context, src, dst string) error {
+// removed so no partial output is ever visible. The destination directory is
+// also fsynced after the rename so crash-recovery guarantees are preserved on
+// platforms that require it (ext4 with data=ordered, xfs).
+func copyFileAtomic(ctx context.Context, src, dst string) (retErr error) {
 	in, err := os.Open(src)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = in.Close() }()
+	defer func() {
+		if cerr := in.Close(); cerr != nil && retErr == nil {
+			retErr = fmt.Errorf("close source %s: %w", src, cerr)
+		}
+	}()
 
-	tmp, err := os.CreateTemp(filepath.Dir(dst), ".pebblify-upload-*")
+	destDir := filepath.Dir(dst)
+	tmp, err := os.CreateTemp(destDir, ".pebblify-upload-*")
 	if err != nil {
 		return fmt.Errorf("create temp: %w", err)
 	}
@@ -109,26 +116,59 @@ func copyFileAtomic(ctx context.Context, src, dst string) error {
 	cleanup := true
 	defer func() {
 		if cleanup {
-			_ = os.Remove(tmpPath)
+			if rmErr := os.Remove(tmpPath); rmErr != nil && !errors.Is(rmErr, os.ErrNotExist) && retErr == nil {
+				// Best-effort removal; surface only when a primary error did
+				// not already eclipse it so operators still see stale-temp
+				// warnings during an otherwise-successful shutdown.
+				retErr = fmt.Errorf("remove temp %s: %w", tmpPath, rmErr)
+			}
 		}
 	}()
 
 	if _, cerr := copyWithContext(ctx, tmp, in); cerr != nil {
-		_ = tmp.Close()
+		if closeErr := tmp.Close(); closeErr != nil {
+			return fmt.Errorf("copy failed: %w (close temp: %v)", cerr, closeErr)
+		}
 		return cerr
 	}
-	if err := tmp.Sync(); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("sync temp %s: %w", tmpPath, err)
+	if syncErr := tmp.Sync(); syncErr != nil {
+		if closeErr := tmp.Close(); closeErr != nil {
+			return fmt.Errorf("sync temp %s: %w (close temp: %v)", tmpPath, syncErr, closeErr)
+		}
+		return fmt.Errorf("sync temp %s: %w", tmpPath, syncErr)
 	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("close temp %s: %w", tmpPath, err)
+	if closeErr := tmp.Close(); closeErr != nil {
+		return fmt.Errorf("close temp %s: %w", tmpPath, closeErr)
 	}
-	if err := os.Rename(tmpPath, dst); err != nil {
-		return fmt.Errorf("rename %s -> %s: %w", tmpPath, dst, err)
+	if renameErr := os.Rename(tmpPath, dst); renameErr != nil {
+		return fmt.Errorf("rename %s -> %s: %w", tmpPath, dst, renameErr)
 	}
 	cleanup = false
+
+	if fsyncErr := fsyncDir(destDir); fsyncErr != nil {
+		return fmt.Errorf("fsync dir %s: %w", destDir, fsyncErr)
+	}
 	return nil
+}
+
+// fsyncDir opens destDir and issues Sync so the directory entry update from
+// the preceding Rename is flushed to disk. On platforms that do not support
+// directory fsync (Windows), Open returns an error that we treat as a no-op.
+func fsyncDir(destDir string) error {
+	d, err := os.Open(destDir)
+	if err != nil {
+		// Directories cannot be opened for fsync on every platform; treat
+		// that path as best-effort rather than a hard failure.
+		if errors.Is(err, os.ErrPermission) || errors.Is(err, os.ErrInvalid) {
+			return nil
+		}
+		return err
+	}
+	if syncErr := d.Sync(); syncErr != nil {
+		_ = d.Close()
+		return syncErr
+	}
+	return d.Close()
 }
 
 // copyWithContext is io.Copy that checks ctx.Done() every 1 MiB chunk.

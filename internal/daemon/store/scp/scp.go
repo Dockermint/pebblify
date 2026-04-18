@@ -21,6 +21,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
@@ -42,6 +43,12 @@ const dialTimeout = 30 * time.Second
 
 // sessionTimeout bounds a single SCP upload session (handshake + transfer).
 const sessionTimeout = 60 * time.Minute
+
+// ackTimeout bounds a single readAck call so a dead peer cannot wedge the
+// session indefinitely. The SCP ack exchange is expected to complete in
+// milliseconds on healthy links; 30 seconds is generous enough for pathological
+// WAN latency without masking a hung peer.
+const ackTimeout = 30 * time.Second
 
 // envKnownHosts names the environment variable that overrides known_hosts
 // discovery. When set and pointing to a readable file, its value wins over
@@ -347,7 +354,7 @@ func annotateWithStderr(err error, buf *bytes.Buffer) error {
 // wait for ack, stream body, send trailing null byte, wait for final ack.
 func transferFile(ctx context.Context, stdin io.WriteCloser, reader *bufio.Reader,
 	localPath string, info os.FileInfo, remoteFile string) error {
-	if err := readAck(reader); err != nil {
+	if err := readAck(ctx, reader); err != nil {
 		return err
 	}
 
@@ -356,7 +363,7 @@ func transferFile(ctx context.Context, stdin io.WriteCloser, reader *bufio.Reade
 	if _, err := io.WriteString(stdin, header); err != nil {
 		return fmt.Errorf("scp sink: write header: %w", err)
 	}
-	if err := readAck(reader); err != nil {
+	if err := readAck(ctx, reader); err != nil {
 		return err
 	}
 
@@ -373,7 +380,7 @@ func transferFile(ctx context.Context, stdin io.WriteCloser, reader *bufio.Reade
 	if _, err := stdin.Write([]byte{0}); err != nil {
 		return fmt.Errorf("scp sink: terminate file: %w", err)
 	}
-	return readAck(reader)
+	return readAck(ctx, reader)
 }
 
 // streamFile copies file to stdin in 1 MiB chunks, honoring ctx cancellation.
@@ -399,21 +406,67 @@ func streamFile(ctx context.Context, stdin io.Writer, file *os.File) error {
 	}
 }
 
+// ackResult carries the outcome of a blocking ack read so the caller can
+// multiplex it against ctx.Done() in readAck.
+type ackResult struct {
+	code byte
+	// msg is populated only when the code is 1 or 2 (scp warning / fatal).
+	msg    string
+	msgErr error
+	err    error
+}
+
 // readAck consumes a single scp acknowledgment byte. 0 = OK; 1 = warning
 // (message follows, newline-terminated); 2 = fatal error.
-func readAck(r *bufio.Reader) error {
-	code, err := r.ReadByte()
-	if err != nil {
-		return fmt.Errorf("scp sink: read ack: %w", err)
-	}
-	switch code {
-	case 0:
-		return nil
-	case 1, 2:
-		msg, _ := r.ReadString('\n')
-		return fmt.Errorf("%w: code=%d message=%q", ErrProtocol, code, msg)
-	default:
-		return fmt.Errorf("%w: unexpected ack byte %#x", ErrProtocol, code)
+//
+// The blocking reads are performed in a helper goroutine so the call can be
+// cancelled by ctx or by the ackTimeout guard without leaving the session
+// wedged on a dead peer. On timeout or ctx cancellation the underlying reader
+// is left in place: returning here aborts the sink dance and the caller tears
+// the session down.
+func readAck(ctx context.Context, r *bufio.Reader) error {
+	resultCh := make(chan ackResult, 1)
+	go func() {
+		code, err := r.ReadByte()
+		if err != nil {
+			resultCh <- ackResult{err: err}
+			return
+		}
+		switch code {
+		case 0:
+			resultCh <- ackResult{code: code}
+		case 1, 2:
+			msg, msgErr := r.ReadString('\n')
+			resultCh <- ackResult{code: code, msg: msg, msgErr: msgErr}
+		default:
+			resultCh <- ackResult{code: code}
+		}
+	}()
+
+	timer := time.NewTimer(ackTimeout)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return fmt.Errorf("scp sink: read ack: %w", ctx.Err())
+	case <-timer.C:
+		return fmt.Errorf("%w: read ack timed out after %s", ErrProtocol, ackTimeout)
+	case res := <-resultCh:
+		if res.err != nil {
+			return fmt.Errorf("%w: read ack: %v", ErrProtocol, res.err)
+		}
+		switch res.code {
+		case 0:
+			return nil
+		case 1, 2:
+			if res.msgErr != nil && !errors.Is(res.msgErr, io.EOF) {
+				return fmt.Errorf("%w: code=%d message=%q (message read error: %v)",
+					ErrProtocol, res.code, res.msg, res.msgErr)
+			}
+			return fmt.Errorf("%w: code=%d message=%q", ErrProtocol, res.code, res.msg)
+		default:
+			return fmt.Errorf("%w: unexpected ack byte %#x", ErrProtocol, res.code)
+		}
 	}
 }
 
@@ -441,6 +494,9 @@ func validateRemoteName(remoteName string) error {
 	}
 	if remoteName == "." || remoteName == ".." {
 		return fmt.Errorf("remoteName %q is not a valid filename", remoteName)
+	}
+	if strings.ContainsFunc(remoteName, unicode.IsControl) {
+		return fmt.Errorf("remoteName %q must not contain control characters", remoteName)
 	}
 	return nil
 }

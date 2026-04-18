@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/Dockermint/Pebblify/internal/daemon/config"
 )
@@ -75,7 +76,8 @@ func TestLocalTarget_Upload_EmptyLocalPath(t *testing.T) {
 	}
 }
 
-// TestLocalTarget_Upload_EmptyRemoteName returns error.
+// TestLocalTarget_Upload_EmptyRemoteName returns error for an empty name and for
+// unsafe names that would write outside LocalSaveDirectory.
 func TestLocalTarget_Upload_EmptyRemoteName(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -87,9 +89,23 @@ func TestLocalTarget_Upload_EmptyRemoteName(t *testing.T) {
 	if err := os.WriteFile(src, []byte("data"), 0o644); err != nil {
 		t.Fatalf("write src: %v", err)
 	}
-	err = tgt.Upload(context.Background(), src, "")
-	if err == nil {
-		t.Fatal("Upload(empty remoteName) expected error, got nil")
+
+	unsafeNames := []struct {
+		name       string
+		remoteName string
+	}{
+		{"empty name", ""},
+		{"traversal dotdot", "../outside.txt"},
+		{"nested traversal", "subdir/../../evil.txt"},
+		{"absolute path", "/etc/passwd"},
+	}
+	for _, tt := range unsafeNames {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if uploadErr := tgt.Upload(context.Background(), src, tt.remoteName); uploadErr == nil {
+				t.Fatalf("Upload(remoteName=%q) expected error, got nil", tt.remoteName)
+			}
+		})
 	}
 }
 
@@ -206,34 +222,69 @@ func TestLocalTarget_Upload_SourcePreserved(t *testing.T) {
 	}
 }
 
-// TestCopyWithContext_CancelMidCopy respects context cancellation mid-read.
+// blockingReader is a mock io.Reader that returns one byte immediately on the
+// first Read (proving the copy loop is active), then blocks on subsequent reads
+// until ctx is cancelled, at which point it returns an error so copyWithContext
+// can observe the cancellation on its next ctx.Err() check at the loop top.
+type blockingReader struct {
+	ctx    context.Context
+	primed bool
+}
+
+func (r *blockingReader) Read(p []byte) (int, error) {
+	if !r.primed {
+		// Return one byte so copyWithContext enters the write path and
+		// completes one full iteration before we force a blocking read.
+		r.primed = true
+		p[0] = 0x00
+		return 1, nil
+	}
+	// Block until the context is cancelled, then return its error so the
+	// caller (copyWithContext loop) propagates it on the next Err() check.
+	<-r.ctx.Done()
+	return 0, r.ctx.Err()
+}
+
+// TestCopyWithContext_CancelMidCopy respects context cancellation mid-copy.
+// A mock reader returns one byte immediately (proving the copy loop is active),
+// then blocks until the context is cancelled. Cancelling while the read blocks
+// exercises the real cancellation code path in copyWithContext.
 func TestCopyWithContext_CancelMidCopy(t *testing.T) {
 	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
-	pr, pw, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("os.Pipe: %v", err)
+	src := &blockingReader{ctx: ctx}
+
+	dst, createErr := os.CreateTemp(t.TempDir(), "dst")
+	if createErr != nil {
+		t.Fatalf("create dst: %v", createErr)
 	}
-	defer func() { _ = pr.Close() }()
-
-	// Write 2 MiB so copy needs more than one 1 MiB chunk.
-	go func() {
-		defer func() { _ = pw.Close() }()
-		chunk := make([]byte, 2<<20)
-		_, _ = pw.Write(chunk)
+	defer func() {
+		if closeErr := dst.Close(); closeErr != nil {
+			t.Errorf("dst.Close: %v", closeErr)
+		}
 	}()
 
-	dst, err := os.CreateTemp(t.TempDir(), "dst")
-	if err != nil {
-		t.Fatalf("create dst: %v", err)
-	}
-	defer func() { _ = dst.Close() }()
+	// copyWithContext runs in a goroutine; result sent back via channel.
+	type result struct{ err error }
+	resultCh := make(chan result, 1)
+	go func() {
+		_, err := copyWithContext(ctx, dst, src)
+		resultCh <- result{err: err}
+	}()
 
-	cancel() // cancel before copy
+	// Give the goroutine enough time to enter the loop and block on the second
+	// Read, then cancel the context to unblock it.
+	time.Sleep(20 * time.Millisecond)
+	cancel()
 
-	_, err = copyWithContext(ctx, dst, pr)
-	if !errors.Is(err, context.Canceled) {
-		t.Errorf("copyWithContext cancelled error = %v, want context.Canceled", err)
+	select {
+	case res := <-resultCh:
+		if !errors.Is(res.err, context.Canceled) {
+			t.Errorf("copyWithContext cancelled error = %v, want context.Canceled", res.err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("copyWithContext did not return after context cancellation")
 	}
 }
