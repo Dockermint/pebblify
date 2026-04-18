@@ -28,6 +28,7 @@ const (
 	CompressionLZ4  = "lz4"
 	CompressionZstd = "zstd"
 	CompressionGzip = "gzip"
+	CompressionZip  = "zip"
 )
 
 // Authentication mode identifiers accepted by the api.authentification_mode field.
@@ -64,8 +65,12 @@ const DefaultConfigPath = "./config.toml"
 // Sentinel errors returned by Load so callers can match on specific validation
 // failures via errors.Is.
 var (
-	// ErrUnsupportedConfigVersion indicates the config_version field is absent
-	// or exceeds SupportedConfigVersion.
+	// ErrMissingConfigVersion indicates the [general] config_version field is
+	// absent from the TOML file. Operators must set the field explicitly so
+	// the loader can migrate or reject old schemas.
+	ErrMissingConfigVersion = errors.New("missing general.config_version")
+	// ErrUnsupportedConfigVersion indicates the config_version field exceeds
+	// SupportedConfigVersion.
 	ErrUnsupportedConfigVersion = errors.New("unsupported config_version")
 	// ErrInvalidPort indicates a listener port value is outside 1..65535.
 	ErrInvalidPort = errors.New("invalid port")
@@ -255,8 +260,14 @@ func Load(path string) (*Loaded, error) {
 	}
 
 	cfg := &Config{}
-	if _, err := toml.Decode(string(raw), cfg); err != nil {
+	meta, err := toml.Decode(string(raw), cfg)
+	if err != nil {
 		return nil, fmt.Errorf("decode config %s: %w", resolved, err)
+	}
+
+	if !meta.IsDefined("general", "config_version") {
+		return nil, fmt.Errorf("%w: set general.config_version=%d",
+			ErrMissingConfigVersion, SupportedConfigVersion)
 	}
 
 	if err := applyDefaults(cfg); err != nil {
@@ -438,7 +449,7 @@ func validateNotify(cfg *Config, secrets Secrets) error {
 // validateSave enforces the save subsystem invariants across local, scp, and s3.
 func validateSave(cfg *Config, secrets Secrets) error {
 	switch cfg.Save.Compression {
-	case CompressionNone, CompressionLZ4, CompressionZstd, CompressionGzip:
+	case CompressionNone, CompressionLZ4, CompressionZstd, CompressionGzip, CompressionZip:
 	default:
 		return fmt.Errorf("%w: %q", ErrInvalidCompression, cfg.Save.Compression)
 	}

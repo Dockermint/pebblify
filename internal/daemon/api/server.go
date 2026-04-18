@@ -77,6 +77,10 @@ func New(cfg config.APISection, secrets config.Secrets, q queue.Queue,
 	h := newHandler(q, logger, opts.Collectors, opts.Version, time.Now())
 
 	mux := http.NewServeMux()
+	// Spec (docs/specs/daemon-mode.md §Routes) documents the singular
+	// "/v1/job" for POST and GET; "/v1/jobs" is registered as an alias so
+	// existing operators and plural URLs keep working through v0.4.0.
+	mux.HandleFunc("/v1/job", h.handleJobs)
 	mux.HandleFunc("/v1/jobs", h.handleJobs)
 	mux.HandleFunc("/v1/status", h.handleStatus)
 

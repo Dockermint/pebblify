@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"time"
 )
 
@@ -142,7 +143,7 @@ func (n *TelegramNotifier) send(ctx context.Context, endpoint string, body []byt
 
 	resp, err := n.client.Do(req)
 	if err != nil {
-		return 0, fmt.Errorf("post telegram request: %w", err)
+		return 0, fmt.Errorf("post telegram request: %w", redactURLError(err))
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -173,6 +174,19 @@ func isTransient(status int, err error) bool {
 		return false
 	}
 	return status >= 500 && status < 600
+}
+
+// redactURLError rewrites the URL carried by a *url.Error so the bot token
+// embedded in the Telegram endpoint path never leaks into log lines or error
+// chains emitted by the HTTP client. Non url.Error values pass through
+// unchanged. The wrapped error (DNS failure, TLS error, etc.) is preserved so
+// callers can still inspect it with errors.As / errors.Is.
+func redactURLError(err error) error {
+	var ue *url.Error
+	if !errors.As(err, &ue) {
+		return err
+	}
+	return &url.Error{Op: ue.Op, URL: "[redacted]", Err: ue.Err}
 }
 
 // sleepCtx sleeps for d or returns ctx.Err() if the context is cancelled.

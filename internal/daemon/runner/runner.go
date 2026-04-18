@@ -193,13 +193,14 @@ func (r *jobRunner) processJob(ctx context.Context, job queue.Job) {
 	r.deps.Collectors.RecordJobStart()
 	r.deps.Collectors.RecordDequeue(r.deps.Queue.Depth())
 
-	logger := r.logger.With("job_id", job.ID, "url", job.URL)
+	redactedURL := redactedJobURL(job.URL)
+	logger := r.logger.With("job_id", job.ID, "url", redactedURL)
 	logger.Info("job started")
 
 	if err := r.safeNotify(ctx, notify.Event{
 		Kind:   notify.EventStarted,
 		JobID:  job.ID,
-		JobURL: job.URL,
+		JobURL: redactedURL,
 	}); err != nil {
 		logger.Warn("notify started failed", "error", err)
 	}
@@ -221,7 +222,7 @@ func (r *jobRunner) processJob(ctx context.Context, job queue.Job) {
 	if err := r.safeNotify(ctx, notify.Event{
 		Kind:   notify.EventCompleted,
 		JobID:  job.ID,
-		JobURL: job.URL,
+		JobURL: redactedURL,
 	}); err != nil {
 		logger.Warn("notify completed failed", "error", err)
 	}
@@ -292,7 +293,7 @@ func (r *jobRunner) failJob(ctx context.Context, logger *slog.Logger,
 	if err := r.safeNotify(ctx, notify.Event{
 		Kind:   notify.EventFailed,
 		JobID:  job.ID,
-		JobURL: job.URL,
+		JobURL: redactedJobURL(job.URL),
 		Error:  cause,
 	}); err != nil {
 		logger.Warn("notify failed failed", "error", err)
@@ -582,7 +583,9 @@ func archiveStem(filename string) string {
 // fragments are ignored. When raw is unparseable, has no path, or the path is
 // "/", the returned basename is the empty string so callers can surface a
 // validation error instead of persisting a junk filename derived from the
-// host.
+// host. A basename that resolves to ".." or that would contain a path
+// separator is likewise rejected so an attacker-controlled URL cannot escape
+// the scratch directory via traversal.
 func urlBasename(raw string) string {
 	u, err := url.Parse(raw)
 	if err != nil {
@@ -593,10 +596,28 @@ func urlBasename(raw string) string {
 		return ""
 	}
 	base := path.Base(p)
-	if base == "/" || base == "." {
+	if base == "/" || base == "." || base == ".." {
+		return ""
+	}
+	if strings.ContainsRune(base, '/') || strings.ContainsRune(base, os.PathSeparator) {
 		return ""
 	}
 	return base
+}
+
+// redactedJobURL returns a log-safe form of raw with userinfo, query string,
+// and fragment stripped. On parse failure the placeholder "[invalid-url]" is
+// returned so logs and notifications never leak attacker-supplied payload
+// fragments verbatim.
+func redactedJobURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "[invalid-url]"
+	}
+	u.User = nil
+	u.RawQuery = ""
+	u.Fragment = ""
+	return u.String()
 }
 
 // findLevelDBRoot locates a directory under root that contains one or more

@@ -47,8 +47,14 @@ func newHandler(q queue.Queue, logger *slog.Logger, collectors *telemetry.Collec
 // queue.Job, and delegates dedup/backpressure to queue.Enqueue. The method
 // check is performed by the dispatcher in server.go.
 func (h *handler) handleSubmitJob(w http.ResponseWriter, r *http.Request) {
-	req, err := decodeSubmitJobRequest(r)
+	req, err := decodeSubmitJobRequest(w, r)
 	if err != nil {
+		var mbErr *http.MaxBytesError
+		if errors.As(err, &mbErr) {
+			writeJSON(w, http.StatusRequestEntityTooLarge,
+				errorResponse{Error: "request body too large"})
+			return
+		}
 		writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
 		return
 	}
@@ -144,10 +150,12 @@ func currentView(j *queue.Job) *currentJobView {
 	}
 }
 
-// decodeSubmitJobRequest parses and validates the submit job body.
-func decodeSubmitJobRequest(r *http.Request) (submitJobRequest, error) {
+// decodeSubmitJobRequest parses and validates the submit job body. Passing
+// w into http.MaxBytesReader wires the server-side limit notification so the
+// connection is closed cleanly when a hostile client exceeds the cap.
+func decodeSubmitJobRequest(w http.ResponseWriter, r *http.Request) (submitJobRequest, error) {
 	var req submitJobRequest
-	body := http.MaxBytesReader(nil, r.Body, maxRequestBodyBytes)
+	body := http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
 	defer func() { _ = body.Close() }()
 
 	dec := json.NewDecoder(body)

@@ -117,7 +117,7 @@ func runDaemonLoop(loaded *config.Loaded, logger *slog.Logger) error {
 		return fmt.Errorf("build api server: %w", err)
 	}
 
-	healthServer, err := health.New(cfg.Health, &readinessAdapter{q: q}, logger)
+	healthServer, err := health.New(cfg.Health, newReadinessAdapter(rootCtx, q), logger)
 	if err != nil {
 		return fmt.Errorf("build health server: %w", err)
 	}
@@ -138,8 +138,10 @@ func runDaemonLoop(loaded *config.Loaded, logger *slog.Logger) error {
 	case err := <-errCh:
 		if err != nil {
 			logger.Error("sub-server exited with error; shutting down", "error", err)
-			cancel()
+		} else {
+			logger.Info("sub-server exited cleanly; shutting down")
 		}
+		cancel()
 	}
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), daemonShutdownTimeout)
@@ -270,24 +272,35 @@ func newLogger(level string) *slog.Logger {
 }
 
 // readinessAdapter bridges the queue's shutdown gate to the ReadinessProvider
-// contract consumed by the health package. Ready() is true while the queue is
-// still accepting enqueue requests (i.e. not shutting down).
+// contract consumed by the health package. Ready() reports false once the
+// root context is cancelled so external orchestrators see the daemon go
+// not-ready as soon as SIGTERM arrives, before the queue is fully drained.
 type readinessAdapter struct {
-	q queue.Queue
+	ctx context.Context
+	q   queue.Queue
 }
 
-// Ready implements health.ReadinessProvider. A disposable test URL with an
-// empty string is used as a cheap probe against queue.Contains; Contains
-// returns false for empty input so the check is equivalent to "queue is
-// still running".
+// newReadinessAdapter wires the root context and queue into a ReadinessProvider.
+// The returned adapter reads ctx.Done() on every Ready() call so it reflects
+// shutdown intent without polling.
+func newReadinessAdapter(ctx context.Context, q queue.Queue) *readinessAdapter {
+	return &readinessAdapter{ctx: ctx, q: q}
+}
+
+// Ready implements health.ReadinessProvider. It returns false when either the
+// queue is absent or the root context has fired (daemon is shutting down).
 func (a *readinessAdapter) Ready() bool {
-	// Enqueue returns ErrShuttingDown when the queue has been closed. We use
-	// the cheaper Depth() probe which is a pure read; the queue is considered
-	// not-ready when Shutdown has closed the channel. The contract here is
-	// "accepting new jobs"; we approximate that by treating a non-nil queue
-	// as ready. Shutdown is signalled via the root context elsewhere so the
-	// health listener stops serving before the queue is marked closed.
-	return a.q != nil
+	if a.q == nil {
+		return false
+	}
+	if a.ctx != nil {
+		select {
+		case <-a.ctx.Done():
+			return false
+		default:
+		}
+	}
+	return true
 }
 
 // daemonUsage prints the subcommand help to w. Write errors are deliberately

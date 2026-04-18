@@ -115,6 +115,11 @@ func New(opts Options) *FIFOQueue {
 }
 
 // Enqueue implements Queue.
+//
+// The non-blocking channel send is performed while q.mu is held. This is safe
+// because Shutdown also acquires q.mu before calling close(q.ch), so the two
+// operations cannot race; the default branch below guarantees Enqueue never
+// blocks while holding the mutex.
 func (q *FIFOQueue) Enqueue(job Job) error {
 	canonical, err := Canonicalize(job.URL)
 	if err != nil {
@@ -122,31 +127,26 @@ func (q *FIFOQueue) Enqueue(job Job) error {
 	}
 
 	q.mu.Lock()
+	defer q.mu.Unlock()
+
 	if q.closed {
-		q.mu.Unlock()
 		return ErrShuttingDown
 	}
 	if _, dup := q.pending[canonical]; dup {
-		q.mu.Unlock()
 		return ErrDuplicate
 	}
 	if q.current != nil {
 		if currentCanonical, cErr := Canonicalize(q.current.URL); cErr == nil && currentCanonical == canonical {
-			q.mu.Unlock()
 			return ErrDuplicate
 		}
 	}
-	q.pending[canonical] = struct{}{}
-	q.mu.Unlock()
 
 	select {
 	case q.ch <- job:
+		q.pending[canonical] = struct{}{}
 		q.logger.Info("queue enqueue", "job_id", job.ID, "depth", len(q.ch))
 		return nil
 	default:
-		q.mu.Lock()
-		delete(q.pending, canonical)
-		q.mu.Unlock()
 		return ErrQueueFull
 	}
 }

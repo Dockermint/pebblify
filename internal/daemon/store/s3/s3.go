@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"os"
 	"path"
+	"path/filepath"
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -113,6 +114,9 @@ func (t *S3Target) Upload(ctx context.Context, localPath, remoteName string) err
 	if localPath == "" || remoteName == "" {
 		return errors.New("s3 upload: localPath and remoteName must be non-empty")
 	}
+	if err := validateRemoteName(remoteName); err != nil {
+		return fmt.Errorf("s3 upload: %w", err)
+	}
 
 	f, err := os.Open(localPath)
 	if err != nil {
@@ -147,6 +151,29 @@ func (t *S3Target) objectKey(remoteName string) string {
 		return name
 	}
 	return path.Join(t.prefix, name)
+}
+
+// validateRemoteName rejects remoteName values that are empty, absolute, or
+// contain path separators so callers cannot inject traversal sequences into
+// the S3 key. filepath.Base comparison catches both POSIX and Windows
+// separators during cross-platform test runs.
+func validateRemoteName(remoteName string) error {
+	if remoteName == "" {
+		return errors.New("remoteName must not be empty")
+	}
+	if filepath.IsAbs(remoteName) {
+		return fmt.Errorf("remoteName %q must not be absolute", remoteName)
+	}
+	if filepath.Base(remoteName) != remoteName {
+		return fmt.Errorf("remoteName %q must be a bare filename", remoteName)
+	}
+	if strings.ContainsAny(remoteName, "/\\") {
+		return fmt.Errorf("remoteName %q must not contain path separators", remoteName)
+	}
+	if remoteName == "." || remoteName == ".." {
+		return fmt.Errorf("remoteName %q is not a valid filename", remoteName)
+	}
+	return nil
 }
 
 // resolveRegion returns the AWS region to use for the S3 client, in order:

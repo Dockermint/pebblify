@@ -1,8 +1,8 @@
 // Package notify delivers daemon job lifecycle events to external sinks.
 //
 // Two implementations ship in v0.4.0: TelegramNotifier (HTTP Bot API, stdlib
-// only) and NoopNotifier (discards every event, used when notify.enable =
-// false). New backends plug in via the Notifier interface without touching the
+// only) and an unexported noop used when notify.enable = false (discards every
+// event). New backends plug in via the Notifier interface without touching the
 // orchestrator.
 package notify
 
@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"html"
 	"log/slog"
 
 	"github.com/Dockermint/Pebblify/internal/daemon/config"
@@ -72,12 +73,12 @@ var ErrUnsupportedMode = errors.New("unsupported notify mode")
 // New constructs the appropriate Notifier implementation from the parsed
 // configuration and the secrets bundle.
 //
-// When cfg.Enable is false the returned notifier is NoopNotifier. When enabled
-// with mode telegram a TelegramNotifier is built using the default HTTP client
-// (10 s timeout). Other modes return ErrUnsupportedMode.
+// When cfg.Enable is false the returned notifier is the unexported noop. When
+// enabled with mode telegram a TelegramNotifier is built using the default
+// HTTP client (10 s timeout). Other modes return ErrUnsupportedMode.
 func New(cfg config.NotifySection, secrets config.Secrets) (Notifier, error) {
 	if !cfg.Enable {
-		return NoopNotifier{}, nil
+		return noopNotifier{}, nil
 	}
 	switch cfg.Mode {
 	case config.NotifyModeTelegram:
@@ -90,14 +91,20 @@ func New(cfg config.NotifySection, secrets config.Secrets) (Notifier, error) {
 // renderMessage produces the HTML-formatted text body used by the Telegram
 // backend. It is package-private so the telegram_notifier test surface can be
 // kept narrow; the format is identical across events.
+//
+// All fields that originate from untrusted input (JobURL, Details, Error text)
+// are passed through html.EscapeString before concatenation so attacker-
+// controlled payloads cannot inject Telegram markup or break the sendMessage
+// call when parse_mode=HTML is used.
 func renderMessage(event Event) string {
 	header := fmt.Sprintf("<b>Pebblify job %s</b>", event.Kind)
-	body := fmt.Sprintf("ID: <code>%s</code>\nURL: %s", event.JobID, event.JobURL)
+	body := fmt.Sprintf("ID: <code>%s</code>\nURL: %s",
+		event.JobID, html.EscapeString(event.JobURL))
 	if event.Details != "" {
-		body += "\n" + event.Details
+		body += "\n" + html.EscapeString(event.Details)
 	}
 	if event.Error != nil {
-		body += "\nError: " + event.Error.Error()
+		body += "\nError: " + html.EscapeString(event.Error.Error())
 	}
 	return header + "\n" + body
 }

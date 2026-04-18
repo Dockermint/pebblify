@@ -17,6 +17,7 @@ import (
 	"path"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"golang.org/x/crypto/ssh"
@@ -33,6 +34,16 @@ const dialTimeout = 30 * time.Second
 
 // sessionTimeout bounds a single SCP upload session (handshake + transfer).
 const sessionTimeout = 60 * time.Minute
+
+// envKnownHosts names the environment variable that overrides known_hosts
+// discovery. When set and pointing to a readable file, its value wins over
+// the system and per-user defaults.
+const envKnownHosts = "PEBBLIFY_SCP_KNOWN_HOSTS"
+
+// systemKnownHosts is the operator-editable path consulted when the env
+// override is unset; it lets package deployments ship a baked-in trust file
+// without requiring a $HOME.
+const systemKnownHosts = "/etc/pebblify/known_hosts"
 
 // Sentinel errors returned by the SCP target.
 var (
@@ -108,6 +119,9 @@ func (t *SCPTarget) Upload(ctx context.Context, localPath, remoteName string) er
 	if localPath == "" || remoteName == "" {
 		return errors.New("scp upload: localPath and remoteName must be non-empty")
 	}
+	if err := validateRemoteName(remoteName); err != nil {
+		return fmt.Errorf("scp upload: %w", err)
+	}
 
 	info, err := os.Stat(localPath)
 	if err != nil {
@@ -171,22 +185,57 @@ func buildAuth(mode string, secrets config.Secrets) (ssh.AuthMethod, error) {
 	}
 }
 
-// loadHostKeyCallback returns an ssh.HostKeyCallback that checks the caller's
-// ~/.ssh/known_hosts file. Missing file or unparseable entries are fatal.
+// loadHostKeyCallback returns an ssh.HostKeyCallback that checks the
+// known_hosts file resolved via the following precedence:
+//
+//  1. $PEBBLIFY_SCP_KNOWN_HOSTS if set and the referenced file is readable.
+//  2. /etc/pebblify/known_hosts if it exists.
+//  3. $HOME/.ssh/known_hosts as the per-user fallback.
+//
+// If none of the above resolve to a readable file, ErrKnownHosts is returned
+// so the daemon refuses to construct an SCPTarget that would otherwise accept
+// any host key.
 func loadHostKeyCallback() (ssh.HostKeyCallback, error) {
-	home, err := os.UserHomeDir()
+	khPath, err := resolveKnownHostsPath()
 	if err != nil {
-		return nil, fmt.Errorf("%w: resolve home: %v", ErrKnownHosts, err)
-	}
-	khPath := filepath.Join(home, ".ssh", "known_hosts")
-	if _, err := os.Stat(khPath); err != nil {
-		return nil, fmt.Errorf("%w: %s: %v", ErrKnownHosts, khPath, err)
+		return nil, err
 	}
 	cb, err := knownhosts.New(khPath)
 	if err != nil {
 		return nil, fmt.Errorf("%w: parse %s: %v", ErrKnownHosts, khPath, err)
 	}
 	return cb, nil
+}
+
+// resolveKnownHostsPath walks the precedence chain documented on
+// loadHostKeyCallback and returns the first readable file, or an aggregated
+// error listing every candidate that was tried.
+func resolveKnownHostsPath() (string, error) {
+	var tried []string
+	if env := os.Getenv(envKnownHosts); env != "" {
+		if _, err := os.Stat(env); err == nil {
+			return env, nil
+		}
+		tried = append(tried, env+" (from "+envKnownHosts+")")
+	}
+	if _, err := os.Stat(systemKnownHosts); err == nil {
+		return systemKnownHosts, nil
+	}
+	tried = append(tried, systemKnownHosts)
+
+	home, err := os.UserHomeDir()
+	if err == nil {
+		userPath := filepath.Join(home, ".ssh", "known_hosts")
+		if _, statErr := os.Stat(userPath); statErr == nil {
+			return userPath, nil
+		}
+		tried = append(tried, userPath)
+	} else {
+		tried = append(tried, fmt.Sprintf("$HOME/.ssh/known_hosts (home lookup failed: %v)", err))
+	}
+
+	return "", fmt.Errorf("%w: no known_hosts file found, tried: %s",
+		ErrKnownHosts, strings.Join(tried, ", "))
 }
 
 // dialContext wraps ssh.NewClientConn with a context-cancellable TCP dial.
@@ -319,6 +368,29 @@ func readAck(r *bufio.Reader) error {
 	default:
 		return fmt.Errorf("%w: unexpected ack byte %#x", ErrProtocol, code)
 	}
+}
+
+// validateRemoteName rejects remoteName values that are empty, absolute, or
+// contain path separators so attacker-controlled input cannot escape the
+// configured remote base directory when the name is path.Join'd into the scp
+// command line.
+func validateRemoteName(remoteName string) error {
+	if remoteName == "" {
+		return errors.New("remoteName must not be empty")
+	}
+	if filepath.IsAbs(remoteName) || strings.HasPrefix(remoteName, "/") {
+		return fmt.Errorf("remoteName %q must not be absolute", remoteName)
+	}
+	if filepath.Base(remoteName) != remoteName {
+		return fmt.Errorf("remoteName %q must be a bare filename", remoteName)
+	}
+	if strings.ContainsAny(remoteName, "/\\") {
+		return fmt.Errorf("remoteName %q must not contain path separators", remoteName)
+	}
+	if remoteName == "." || remoteName == ".." {
+		return fmt.Errorf("remoteName %q is not a valid filename", remoteName)
+	}
+	return nil
 }
 
 // shellQuote returns s wrapped in single quotes, escaping any embedded single
