@@ -28,6 +28,18 @@ func scrapeMetrics(t *testing.T, reg *prometheus.Registry) string {
 	return rr.Body.String()
 }
 
+// mustRegister registers each collector with reg and fatally fails the test on any error.
+// Using this helper instead of silently discarding the error from reg.Register ensures
+// test setup failures surface immediately rather than producing silent no-ops.
+func mustRegister(t *testing.T, reg *prometheus.Registry, collectors ...prometheus.Collector) {
+	t.Helper()
+	for _, c := range collectors {
+		if err := reg.Register(c); err != nil {
+			t.Fatalf("mustRegister: failed to register collector: %v", err)
+		}
+	}
+}
+
 // ---- Collectors helper method tests ----
 
 // TestCollectors_RecordEnqueue_IncrementsEnqueuedAndSetsDepth.
@@ -42,8 +54,7 @@ func TestCollectors_RecordEnqueue_IncrementsEnqueuedAndSetsDepth(t *testing.T) {
 			Namespace: "t", Name: "queue_depth", Help: "h",
 		}),
 	}
-	_ = reg.Register(c.JobsTotal)
-	_ = reg.Register(c.QueueDepth)
+	mustRegister(t, reg, c.JobsTotal, c.QueueDepth)
 
 	c.RecordEnqueue(5)
 
@@ -65,7 +76,7 @@ func TestCollectors_RecordDequeue_UpdatesQueueDepth(t *testing.T) {
 			Namespace: "t", Name: "queue_depth_d", Help: "h",
 		}),
 	}
-	_ = reg.Register(c.QueueDepth)
+	mustRegister(t, reg, c.QueueDepth)
 
 	c.RecordDequeue(3)
 	body := scrapeMetrics(t, reg)
@@ -83,7 +94,7 @@ func TestCollectors_RecordJobStart_SetsActiveToOne(t *testing.T) {
 			Namespace: "t", Name: "active_s", Help: "h",
 		}),
 	}
-	_ = reg.Register(c.Active)
+	mustRegister(t, reg, c.Active)
 	c.RecordJobStart()
 	body := scrapeMetrics(t, reg)
 	if !strings.Contains(body, "1") {
@@ -106,9 +117,7 @@ func TestCollectors_RecordJobEnd_Success_SetsCompletedAndClearsActive(t *testing
 			Namespace: "t", Name: "active_end", Help: "h",
 		}),
 	}
-	_ = reg.Register(c.JobsTotal)
-	_ = reg.Register(c.JobDuration)
-	_ = reg.Register(c.Active)
+	mustRegister(t, reg, c.JobsTotal, c.JobDuration, c.Active)
 
 	c.Active.Set(1)
 	c.RecordJobEnd(500*time.Millisecond, true)
@@ -138,9 +147,7 @@ func TestCollectors_RecordJobEnd_Failure_SetsFailedLabel(t *testing.T) {
 			Namespace: "t", Name: "active_fail", Help: "h",
 		}),
 	}
-	_ = reg.Register(c.JobsTotal)
-	_ = reg.Register(c.JobDuration)
-	_ = reg.Register(c.Active)
+	mustRegister(t, reg, c.JobsTotal, c.JobDuration, c.Active)
 
 	c.RecordJobEnd(time.Second, false)
 
@@ -159,7 +166,7 @@ func TestCollectors_AddBytesDownloaded_Accumulates(t *testing.T) {
 			Namespace: "t", Name: "bytes_dl", Help: "h",
 		}),
 	}
-	_ = reg.Register(c.BytesDownloaded)
+	mustRegister(t, reg, c.BytesDownloaded)
 
 	c.AddBytesDownloaded(1024)
 	c.AddBytesDownloaded(1024)
@@ -179,7 +186,7 @@ func TestCollectors_AddBytesUploaded_Accumulates(t *testing.T) {
 			Namespace: "t", Name: "bytes_ul", Help: "h",
 		}),
 	}
-	_ = reg.Register(c.BytesUploaded)
+	mustRegister(t, reg, c.BytesUploaded)
 
 	c.AddBytesUploaded(512)
 	c.AddBytesUploaded(512)
@@ -215,7 +222,7 @@ func TestCollectors_AddBytesDownloaded_ZeroAndNegativeSkipped(t *testing.T) {
 			Namespace: "t", Name: "bytes_dl_zero", Help: "h",
 		}),
 	}
-	_ = reg.Register(c.BytesDownloaded)
+	mustRegister(t, reg, c.BytesDownloaded)
 
 	c.AddBytesDownloaded(0)
 	c.AddBytesDownloaded(-100)

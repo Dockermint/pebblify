@@ -140,15 +140,15 @@ func TestReadAck_CancelledContext(t *testing.T) {
 
 // ---- buildAuth ----
 
-// TestBuildAuth_NoneMode returns a non-nil AuthMethod for the "none" auth mode.
+// TestBuildAuth_NoneMode returns ErrUnsupportedAuth for the "none" auth mode.
+// The "none" mode is explicitly rejected because ssh.Password("") sends an
+// empty-password attempt that almost always fails and produces a confusing
+// error. Operators must use "key" or "password" instead.
 func TestBuildAuth_NoneMode(t *testing.T) {
 	t.Parallel()
-	auth, err := buildAuth(config.SCPAuthNone, config.Secrets{})
-	if err != nil {
-		t.Fatalf("buildAuth(none) unexpected error: %v", err)
-	}
-	if auth == nil {
-		t.Error("buildAuth(none) returned nil AuthMethod")
+	_, err := buildAuth(config.SCPAuthNone, config.Secrets{})
+	if !errors.Is(err, ErrUnsupportedAuth) {
+		t.Errorf("buildAuth(none) error = %v, want wrapping %v", err, ErrUnsupportedAuth)
 	}
 }
 
@@ -206,9 +206,10 @@ func TestBuildAuth_UnknownMode(t *testing.T) {
 // recognised branch (none + password + key-with-missing-path before read).
 func TestBuildAuth_AllKnownModesCovered(t *testing.T) {
 	t.Parallel()
-	// none — should succeed
-	if _, err := buildAuth(config.SCPAuthNone, config.Secrets{}); err != nil {
-		t.Errorf("buildAuth(none) unexpected error: %v", err)
+	// none — must return ErrUnsupportedAuth; the mode is reserved but not implemented
+	// because ssh.Password("") sends an empty-password attempt that misleads operators.
+	if _, err := buildAuth(config.SCPAuthNone, config.Secrets{}); !errors.Is(err, ErrUnsupportedAuth) {
+		t.Errorf("buildAuth(none) error = %v, want wrapping %v", err, ErrUnsupportedAuth)
 	}
 	// password with value — should succeed
 	if _, err := buildAuth(config.SCPAuthPassword, config.Secrets{SCPPassword: "x"}); err != nil {

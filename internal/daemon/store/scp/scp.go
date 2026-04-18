@@ -62,10 +62,15 @@ const systemKnownHosts = "/etc/pebblify/known_hosts"
 
 // Sentinel errors returned by the SCP target.
 var (
-	// ErrUnsupportedAuth indicates cfg.AuthentificationMode is unrecognised.
+	// ErrUnsupportedAuth indicates cfg.AuthentificationMode is unrecognised
+	// or not usable by this package.
 	ErrUnsupportedAuth = errors.New("scp: unsupported authentification_mode")
 	// ErrMissingSecret indicates a required secret (key path, password) is empty.
 	ErrMissingSecret = errors.New("scp: missing required secret")
+	// ErrInvalidField indicates a non-secret configuration field (host, port,
+	// username) failed validation. Callers distinguish "bad config" from
+	// "missing secret" by matching on this sentinel via errors.Is.
+	ErrInvalidField = errors.New("scp: invalid field")
 	// ErrKnownHosts indicates the known_hosts file could not be loaded or the
 	// remote host is not present in it.
 	ErrKnownHosts = errors.New("scp: known_hosts validation failed")
@@ -93,13 +98,13 @@ type SCPTarget struct {
 // home). Callers needing a subdirectory encode it in remoteName.
 func New(cfg config.SCPSaveSection, secrets config.Secrets) (*SCPTarget, error) {
 	if cfg.Host == "" {
-		return nil, fmt.Errorf("%w: host must not be empty", ErrMissingSecret)
+		return nil, fmt.Errorf("%w: host must not be empty", ErrInvalidField)
 	}
 	if cfg.Username == "" {
-		return nil, fmt.Errorf("%w: username must not be empty", ErrMissingSecret)
+		return nil, fmt.Errorf("%w: username must not be empty", ErrInvalidField)
 	}
 	if cfg.Port <= 0 || cfg.Port > 65535 {
-		return nil, fmt.Errorf("%w: port %d out of range", ErrMissingSecret, cfg.Port)
+		return nil, fmt.Errorf("%w: port %d out of range", ErrInvalidField, cfg.Port)
 	}
 
 	auth, err := buildAuth(cfg.AuthentificationMode, secrets)
@@ -194,7 +199,14 @@ func buildAuth(mode string, secrets config.Secrets) (ssh.AuthMethod, error) {
 		}
 		return ssh.Password(secrets.SCPPassword), nil
 	case config.SCPAuthNone:
-		return ssh.Password(""), nil
+		// The "none" authentification_mode is reserved for future protocol-level
+		// no-auth support. ssh.Password("") sends an empty-password attempt,
+		// which almost always fails and surfaces as a confusing generic auth
+		// error. Reject the mode at construction so operators receive an
+		// actionable message pointing at authentification_mode instead of
+		// debugging remote sshd logs.
+		return nil, fmt.Errorf("%w: %q mode is not supported; use %q or %q",
+			ErrUnsupportedAuth, mode, config.SCPAuthKey, config.SCPAuthPassword)
 	default:
 		return nil, fmt.Errorf("%w: %q", ErrUnsupportedAuth, mode)
 	}
@@ -253,17 +265,47 @@ func resolveKnownHostsPath() (string, error) {
 		ErrKnownHosts, strings.Join(tried, ", "))
 }
 
-// dialContext wraps ssh.NewClientConn with a context-cancellable TCP dial.
+// dialContext wraps ssh.NewClientConn with a context-cancellable TCP dial and
+// a bounded SSH handshake. Once TCP is up, a deadline is applied to the raw
+// conn so a peer that stalls the SSH key exchange cannot wedge the caller;
+// the deadline is cleared before the handshake value is returned so steady-
+// state reads are not artificially truncated. A watcher goroutine also closes
+// conn on ctx cancellation as a belt-and-suspenders unblock for handshake
+// paths that do not observe the deadline quickly.
 func dialContext(ctx context.Context, network, addr string, cfg *ssh.ClientConfig) (*ssh.Client, error) {
 	var d net.Dialer
 	conn, err := d.DialContext(ctx, network, addr)
 	if err != nil {
 		return nil, err
 	}
+
+	deadline := time.Now().Add(dialTimeout)
+	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
+		deadline = d
+	}
+	if err := conn.SetDeadline(deadline); err != nil {
+		_ = conn.Close()
+		return nil, fmt.Errorf("set handshake deadline: %w", err)
+	}
+
+	handshakeDone := make(chan struct{})
+	defer close(handshakeDone)
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = conn.Close()
+		case <-handshakeDone:
+		}
+	}()
+
 	c, chans, reqs, err := ssh.NewClientConn(conn, addr, cfg)
 	if err != nil {
 		_ = conn.Close()
 		return nil, err
+	}
+	if err := conn.SetDeadline(time.Time{}); err != nil {
+		_ = c.Close()
+		return nil, fmt.Errorf("clear handshake deadline: %w", err)
 	}
 	return ssh.NewClient(c, chans, reqs), nil
 }
