@@ -124,7 +124,6 @@ func runDaemonLoop(loaded *config.Loaded, logger *slog.Logger) error {
 
 	logger.Info("pebblify daemon started",
 		"version", Version,
-		"api_enabled", cfg.API.Enable,
 		"health_enabled", cfg.Health.Enable,
 		"telemetry_enabled", cfg.Telemetry.Enable,
 		"notify_enabled", cfg.Notify.Enable,
@@ -167,16 +166,15 @@ func startConcurrentServers(ctx context.Context, logger *slog.Logger,
 		errCh <- nil
 	}()
 
-	if apiSrv != nil {
-		go func() {
-			if err := apiSrv.Start(ctx); err != nil {
-				logger.Error("api server exited", "error", err)
-				errCh <- err
-				return
-			}
-			errCh <- nil
-		}()
-	}
+	go func() {
+		if err := apiSrv.Start(ctx); err != nil {
+			logger.Error("api server exited", "error", err)
+			errCh <- err
+			return
+		}
+		errCh <- nil
+	}()
+
 	if healthSrv != nil {
 		go func() {
 			if err := healthSrv.Start(ctx); err != nil {
@@ -220,15 +218,14 @@ func drainDaemon(ctx context.Context, logger *slog.Logger, q queue.Queue,
 		}
 	}()
 
-	if apiSrv != nil {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			if err := apiSrv.Stop(ctx); err != nil {
-				logger.Warn("api server stop error", "error", err)
-			}
-		}()
-	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if err := apiSrv.Stop(ctx); err != nil {
+			logger.Warn("api server stop error", "error", err)
+		}
+	}()
+
 	if healthSrv != nil {
 		wg.Add(1)
 		go func() {

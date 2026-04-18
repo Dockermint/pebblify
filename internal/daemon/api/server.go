@@ -55,16 +55,12 @@ var ErrMissingBasicAuthToken = errors.New("api: basic_auth enabled but token is 
 
 // New constructs an API Server bound to cfg.Host:cfg.Port.
 //
-// When cfg.Enable is false the returned server is nil and no error is
-// reported; callers should treat nil as "listener disabled". Otherwise the
-// middleware chain is recover -> access log -> auth, wrapping a mux with the
-// three v1 routes. The caller is expected to have validated cfg (port range,
-// host, authentication mode) before invoking New.
+// The API listener is always active in daemon mode; there is no enable gate.
+// The middleware chain is recover -> access log -> auth, wrapping a mux with
+// the three v1 routes. The caller is expected to have validated cfg (port
+// range, host, authentication mode) before invoking New.
 func New(cfg config.APISection, secrets config.Secrets, q queue.Queue,
 	logger *slog.Logger, opts Options) (Server, error) {
-	if !cfg.Enable {
-		return nil, nil
-	}
 	if q == nil {
 		return nil, errors.New("api: queue is nil")
 	}

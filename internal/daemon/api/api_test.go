@@ -519,24 +519,10 @@ func TestNewJobID_Format(t *testing.T) {
 
 // ---- New constructor ----
 
-// TestNew_DisabledReturnsNilNoError when api.enable = false.
-func TestNew_DisabledReturnsNilNoError(t *testing.T) {
-	t.Parallel()
-	cfg := config.APISection{Enable: false}
-	srv, err := New(cfg, config.Secrets{}, &fakeQueue{}, nil, Options{})
-	if err != nil {
-		t.Fatalf("New(disabled) error: %v", err)
-	}
-	if srv != nil {
-		t.Errorf("New(disabled) = %+v, want nil", srv)
-	}
-}
-
 // TestNew_BasicAuthMissingToken returns ErrMissingBasicAuthToken.
 func TestNew_BasicAuthMissingToken(t *testing.T) {
 	t.Parallel()
 	cfg := config.APISection{
-		Enable:               true,
 		Host:                 "127.0.0.1",
 		Port:                 2324,
 		AuthentificationMode: "basic_auth",
@@ -551,7 +537,6 @@ func TestNew_BasicAuthMissingToken(t *testing.T) {
 func TestNew_NilQueueReturnsError(t *testing.T) {
 	t.Parallel()
 	cfg := config.APISection{
-		Enable:               true,
 		Host:                 "127.0.0.1",
 		Port:                 2324,
 		AuthentificationMode: "unsecure",

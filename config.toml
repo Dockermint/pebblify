@@ -2,7 +2,6 @@
 config_version = 0
 
 [api]
-enable = false
 host = "127.0.0.1"
 port = 2324
 authentification_mode = "basic_auth"

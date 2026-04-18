@@ -7,6 +7,15 @@ import (
 	"testing"
 )
 
+// validAPITOML returns a minimal valid [api] block (always-on in daemon mode).
+func validAPITOML() string {
+	return `[api]
+host = "127.0.0.1"
+port = 2324
+authentification_mode = "unsecure"
+`
+}
+
 // validMinimalTOML returns the minimal valid config that passes all validators.
 func validMinimalTOML(t *testing.T) string {
 	t.Helper()
@@ -14,9 +23,7 @@ func validMinimalTOML(t *testing.T) string {
 [general]
 config_version = 0
 
-[api]
-enable = false
-
+` + validAPITOML() + `
 [notify]
 enable = false
 
@@ -99,8 +106,7 @@ func TestLoad_UnsupportedConfigVersion(t *testing.T) {
 	toml := `
 [general]
 config_version = 1
-[api]
-enable = false
+` + validAPITOML() + `
 [notify]
 enable = false
 [telemetry]
@@ -139,7 +145,6 @@ func TestLoad_InvalidPort(t *testing.T) {
 [general]
 config_version = 0
 [api]
-enable = true
 host = "127.0.0.1"
 port = 0
 authentification_mode = "unsecure"
@@ -168,7 +173,6 @@ enable = false
 [general]
 config_version = 0
 [api]
-enable = true
 host = "127.0.0.1"
 port = 70000
 authentification_mode = "unsecure"
@@ -196,8 +200,7 @@ enable = false
 			toml: `
 [general]
 config_version = 0
-[api]
-enable = false
+` + validAPITOML() + `
 [notify]
 enable = false
 [telemetry]
@@ -224,8 +227,7 @@ enable = false
 			toml: `
 [general]
 config_version = 0
-[api]
-enable = false
+` + validAPITOML() + `
 [notify]
 enable = false
 [telemetry]
@@ -252,8 +254,7 @@ enable = false
 			toml: `
 [general]
 config_version = 0
-[api]
-enable = false
+` + validAPITOML() + `
 [notify]
 enable = false
 [telemetry]
@@ -297,7 +298,6 @@ func TestLoad_InvalidAPIAuthMode(t *testing.T) {
 [general]
 config_version = 0
 [api]
-enable = true
 host = "127.0.0.1"
 port = 2324
 authentification_mode = "oauth2"
@@ -333,7 +333,6 @@ func TestLoad_BasicAuthMissingToken(t *testing.T) {
 [general]
 config_version = 0
 [api]
-enable = true
 host = "127.0.0.1"
 port = 2324
 authentification_mode = "basic_auth"
@@ -369,7 +368,6 @@ func TestLoad_BasicAuthWithToken(t *testing.T) {
 [general]
 config_version = 0
 [api]
-enable = true
 host = "127.0.0.1"
 port = 2324
 authentification_mode = "basic_auth"
@@ -407,8 +405,7 @@ func TestLoad_InvalidNotifyMode(t *testing.T) {
 	toml := `
 [general]
 config_version = 0
-[api]
-enable = false
+` + validAPITOML() + `
 [notify]
 enable = true
 mode = "slack"
@@ -442,8 +439,7 @@ func TestLoad_NotifyTelegramMissingToken(t *testing.T) {
 	toml := `
 [general]
 config_version = 0
-[api]
-enable = false
+` + validAPITOML() + `
 [notify]
 enable = true
 mode = "telegram"
@@ -477,8 +473,7 @@ func TestLoad_NotifyTelegramMissingChannelID(t *testing.T) {
 	toml := `
 [general]
 config_version = 0
-[api]
-enable = false
+` + validAPITOML() + `
 [notify]
 enable = true
 mode = "telegram"
@@ -523,8 +518,7 @@ func TestLoad_InvalidCompression(t *testing.T) {
 			toml := `
 [general]
 config_version = 0
-[api]
-enable = false
+` + validAPITOML() + `
 [notify]
 enable = false
 [telemetry]
@@ -561,8 +555,7 @@ func TestLoad_ValidCompressionModes(t *testing.T) {
 			toml := `
 [general]
 config_version = 0
-[api]
-enable = false
+` + validAPITOML() + `
 [notify]
 enable = false
 [telemetry]
@@ -599,8 +592,7 @@ func TestLoad_SCPMissingHost(t *testing.T) {
 	toml := `
 [general]
 config_version = 0
-[api]
-enable = false
+` + validAPITOML() + `
 [notify]
 enable = false
 [telemetry]
@@ -636,8 +628,7 @@ func TestLoad_SCPInvalidAuthMode(t *testing.T) {
 	toml := `
 [general]
 config_version = 0
-[api]
-enable = false
+` + validAPITOML() + `
 [notify]
 enable = false
 [telemetry]
@@ -687,8 +678,7 @@ func TestLoad_SCPValidAuthModes(t *testing.T) {
 			toml := `
 [general]
 config_version = 0
-[api]
-enable = false
+` + validAPITOML() + `
 [notify]
 enable = false
 [telemetry]
@@ -726,8 +716,7 @@ func TestLoad_S3MissingBucket(t *testing.T) {
 	toml := `
 [general]
 config_version = 0
-[api]
-enable = false
+` + validAPITOML() + `
 [notify]
 enable = false
 [telemetry]
@@ -762,8 +751,7 @@ func TestLoad_S3MissingSecretKey(t *testing.T) {
 	toml := `
 [general]
 config_version = 0
-[api]
-enable = false
+` + validAPITOML() + `
 [notify]
 enable = false
 [telemetry]
@@ -798,8 +786,7 @@ func TestLoad_LocalMissingDirectory(t *testing.T) {
 	toml := `
 [general]
 config_version = 0
-[api]
-enable = false
+` + validAPITOML() + `
 [notify]
 enable = false
 [telemetry]
@@ -831,8 +818,7 @@ func TestLoad_HomeTildeExpansion(t *testing.T) {
 	toml := `
 [general]
 config_version = 0
-[api]
-enable = false
+` + validAPITOML() + `
 [notify]
 enable = false
 [telemetry]
@@ -897,7 +883,6 @@ func TestLoad_APIHostEmptyWhenEnabled(t *testing.T) {
 [general]
 config_version = 0
 [api]
-enable = true
 host = ""
 port = 2324
 authentification_mode = "basic_auth"

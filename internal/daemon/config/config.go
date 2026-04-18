@@ -102,10 +102,9 @@ type GeneralSection struct {
 	ConfigVersion int `toml:"config_version"`
 }
 
-// APISection holds the [api] TOML section.
+// APISection holds the [api] TOML section. The API listener is always active
+// in daemon mode as of v0.4.0; there is no enable gate.
 type APISection struct {
-	// Enable toggles the HTTP API listener.
-	Enable bool `toml:"enable"`
 	// Host is the bind address.
 	Host string `toml:"host"`
 	// Port is the listener TCP port.
@@ -365,11 +364,10 @@ func validate(cfg *Config, secrets Secrets) error {
 }
 
 // validatePorts ensures every enabled listener has a port in the valid range.
+// The API listener is always active, so api.port is always checked.
 func validatePorts(cfg *Config) error {
-	if cfg.API.Enable {
-		if err := checkPort("api.port", cfg.API.Port); err != nil {
-			return err
-		}
+	if err := checkPort("api.port", cfg.API.Port); err != nil {
+		return err
 	}
 	if cfg.Telemetry.Enable {
 		if err := checkPort("telemetry.port", cfg.Telemetry.Port); err != nil {
@@ -397,11 +395,9 @@ func checkPort(field string, p int) error {
 	return nil
 }
 
-// validateAPI enforces the API subsystem invariants.
+// validateAPI enforces the API subsystem invariants. The API listener is
+// always active in daemon mode, so these checks run unconditionally.
 func validateAPI(cfg *Config, secrets Secrets) error {
-	if !cfg.API.Enable {
-		return nil
-	}
 	switch cfg.API.AuthentificationMode {
 	case APIAuthBasic:
 		if secrets.BasicAuthToken == "" {
@@ -414,7 +410,7 @@ func validateAPI(cfg *Config, secrets Secrets) error {
 		return fmt.Errorf("%w: %q", ErrInvalidAPIAuthMode, cfg.API.AuthentificationMode)
 	}
 	if cfg.API.Host == "" {
-		return fmt.Errorf("%w: api.host must not be empty when api.enable=true", ErrInvalidField)
+		return fmt.Errorf("%w: api.host must not be empty", ErrInvalidField)
 	}
 	return nil
 }

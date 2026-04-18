@@ -2,7 +2,7 @@
 
 Owner: `@software-architect`
 Date: 2026-04-18
-Last revised: 2026-04-18 (CEO decisions locked — see section "CEO Decisions Locked 2026-04-18")
+Last revised: 2026-04-18 (CEO decisions locked — see section "CEO Decisions Locked 2026-04-18"; CEO amendment 2026-04-18: API always-on)
 Feature branch: `feat/daemon-mode`
 Implementation owner: `@go-developer`, `@lead-dev`, `@container-engineer`
 
@@ -21,6 +21,8 @@ The five open questions from the initial draft were answered by the CEO on 2026-
 4. **systemd unit ownership**: Reassigned to `@container-engineer`. See "systemd Unit Ownership" section and the CLAUDE.md scope amendment flag.
 
 5. **Platform**: Daemon is Linux-only. macOS users run the daemon via Docker or Podman. The `install-cli` target remains cross-platform (all four build targets). `install-systemd-daemon` is Linux-only. There is no `install-launchd-daemon` target in v0.4.0 or any planned release.
+
+6. **API always-on** *(CEO amendment 2026-04-18)*: `[api].enable` field removed. The HTTP API is unconditionally active in daemon mode. Without the API the daemon cannot receive jobs and is useless; an opt-out flag would be a footgun. `host`, `port`, and `authentification_mode` remain configurable.
 
 ---
 
@@ -135,7 +137,6 @@ Default path: `./config.toml`. Overridden by `PEBBLIFY_CONFIG_PATH` env var.
 config_version = 0
 
 [api]
-enable = false
 host = "127.0.0.1"
 port = 2324
 authentification_mode = "basic_auth"  # basic_auth | unsecure
@@ -256,7 +257,7 @@ Prometheus gauge `pebblify_daemon_queue_depth` mirrors `queue_depth` in real tim
 
 ### Listener
 
-Bound to `api.host:api.port`. Enabled only when `api.enable = true`.
+Bound to `api.host:api.port`. Always active in daemon mode; no enable flag.
 
 HTTP/1.1, no TLS (operators terminate TLS at a reverse proxy). Future versions may add TLS config.
 
@@ -517,7 +518,7 @@ Installs daemon for system-wide use under systemd. **Linux-only**. Requires root
 Requirements:
 - Binary installed to `/usr/local/bin/pebblify`.
 - Creates `/etc/pebblify/` directory (mode 0750, owned root:root).
-- Creates `/etc/pebblify/config.toml` from an embedded template with sane defaults (api.enable=false, health.enable=true, telemetry.enable=true). Does NOT overwrite if file already exists.
+- Creates `/etc/pebblify/config.toml` from an embedded template with sane defaults (health.enable=true, telemetry.enable=true). Does NOT overwrite if file already exists.
 - Copies `systemd/pebblify.env.example` to `/etc/pebblify/.env`. Mode 0600, owned root:root. Does NOT overwrite if file already exists.
 - Copies `systemd/pebblify.service` (authored by `@container-engineer`) to `/etc/systemd/system/pebblify.service`. Does NOT overwrite if file already exists.
 - Does NOT run `systemctl enable` or `systemctl start`. The operator does this manually.
