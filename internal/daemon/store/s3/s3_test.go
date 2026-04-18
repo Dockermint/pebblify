@@ -166,6 +166,14 @@ func TestS3Target_Upload_HappyPath(t *testing.T) {
 	if *m.lastInput.Key != "snaps/snap.tar.lz4" {
 		t.Errorf("Key = %q, want %q", *m.lastInput.Key, "snaps/snap.tar.lz4")
 	}
+	wantSize := int64(len(content))
+	if m.lastInput.ContentLength == nil || *m.lastInput.ContentLength != wantSize {
+		var got int64
+		if m.lastInput.ContentLength != nil {
+			got = *m.lastInput.ContentLength
+		}
+		t.Errorf("ContentLength = %d, want %d", got, wantSize)
+	}
 }
 
 // TestS3Target_Upload_PropagatesPutError wraps uploader errors.
@@ -196,7 +204,7 @@ func TestNew_EmptyBucket(t *testing.T) {
 		BucketName:  "",
 		S3AccessKey: "AKID",
 	}
-	_, err := New(cfg, config.Secrets{S3SecretKey: "secret"})
+	_, err := New(context.Background(), cfg, config.Secrets{S3SecretKey: "secret"}, nil)
 	if !errors.Is(err, ErrInvalidConfig) {
 		t.Errorf("New() error = %v, want %v", err, ErrInvalidConfig)
 	}
@@ -210,7 +218,7 @@ func TestNew_EmptyAccessKey(t *testing.T) {
 		BucketName:  "bucket",
 		S3AccessKey: "",
 	}
-	_, err := New(cfg, config.Secrets{S3SecretKey: "secret"})
+	_, err := New(context.Background(), cfg, config.Secrets{S3SecretKey: "secret"}, nil)
 	if !errors.Is(err, ErrInvalidConfig) {
 		t.Errorf("New() error = %v, want %v", err, ErrInvalidConfig)
 	}
@@ -224,7 +232,7 @@ func TestNew_EmptySecretKey(t *testing.T) {
 		BucketName:  "bucket",
 		S3AccessKey: "AKID",
 	}
-	_, err := New(cfg, config.Secrets{S3SecretKey: ""})
+	_, err := New(context.Background(), cfg, config.Secrets{S3SecretKey: ""}, nil)
 	if !errors.Is(err, ErrMissingSecret) {
 		t.Errorf("New() error = %v, want %v", err, ErrMissingSecret)
 	}

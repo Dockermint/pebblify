@@ -871,7 +871,10 @@ enable = false
 	if err != nil {
 		t.Fatalf("Load() unexpected error: %v", err)
 	}
-	home, _ := os.UserHomeDir()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatalf("os.UserHomeDir: %v", err)
+	}
 	want := home + "/snapshots"
 	if got.Config.Save.Local.LocalSaveDirectory != want {
 		t.Errorf("LocalSaveDirectory = %q, want %q", got.Config.Save.Local.LocalSaveDirectory, want)

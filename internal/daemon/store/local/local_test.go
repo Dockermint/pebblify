@@ -211,7 +211,10 @@ func TestCopyWithContext_CancelMidCopy(t *testing.T) {
 	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 
-	pr, pw, _ := os.Pipe()
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
 	defer func() { _ = pr.Close() }()
 
 	// Write 2 MiB so copy needs more than one 1 MiB chunk.

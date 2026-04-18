@@ -3,6 +3,8 @@ package queue
 import (
 	"context"
 	"errors"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -474,6 +476,85 @@ func TestFIFOQueue_EnqueueCurrentDuplicate(t *testing.T) {
 		t.Errorf("Enqueue current URL error = %v, want %v", err, ErrDuplicate)
 	}
 	q.CompleteCurrent()
+}
+
+// TestFIFOQueue_DequeueShutdownRace is a race-detector regression test that
+// spams Enqueue, Dequeue, and Shutdown concurrently and asserts that Shutdown
+// never returns before every dequeued job has been CompleteCurrent-ed.
+//
+// The test runs for a fixed duration rather than a fixed iteration count so the
+// scheduler has many opportunities to interleave goroutines.
+func TestFIFOQueue_DequeueShutdownRace(t *testing.T) {
+	t.Parallel()
+
+	const (
+		testDuration = 200 * time.Millisecond
+		bufSize      = 8
+	)
+
+	// dequeued counts jobs taken from the queue.
+	// completed counts CompleteCurrent calls.
+	// Both are updated under the race detector's watchful eye.
+	var dequeued, completed atomic.Int64
+
+	q := New(Options{BufferSize: bufSize})
+
+	// Producer: enqueues distinct URLs as fast as possible.
+	var producerWG sync.WaitGroup
+	producerWG.Add(1)
+	go func() {
+		defer producerWG.Done()
+		i := 0
+		deadline := time.Now().Add(testDuration)
+		for time.Now().Before(deadline) {
+			url := "https://example.com/" + string(rune('a'+i%26)) + "?" + string(rune('0'+i%10))
+			_ = q.Enqueue(Job{ID: "j", URL: url})
+			i++
+		}
+	}()
+
+	// Worker: dequeues jobs and immediately calls CompleteCurrent, simulating a
+	// fast worker.  Stops once Dequeue returns ErrShuttingDown or the context
+	// is cancelled.
+	workerCtx, workerCancel := context.WithTimeout(context.Background(), testDuration+500*time.Millisecond)
+	defer workerCancel()
+
+	var workerWG sync.WaitGroup
+	workerWG.Add(1)
+	go func() {
+		defer workerWG.Done()
+		for {
+			_, err := q.Dequeue(workerCtx)
+			if err != nil {
+				return
+			}
+			dequeued.Add(1)
+			// Simulate minimal work then signal completion.
+			q.CompleteCurrent()
+			completed.Add(1)
+		}
+	}()
+
+	// Let the producer run for the test duration then shut down.
+	time.Sleep(testDuration)
+	producerWG.Wait()
+
+	shutCtx, shutCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer shutCancel()
+	if err := q.Shutdown(shutCtx); err != nil {
+		t.Errorf("Shutdown() error = %v", err)
+	}
+
+	// After Shutdown returns, cancel the worker so it stops blocking.
+	workerCancel()
+	workerWG.Wait()
+
+	// Invariant: every dequeued job must have been CompleteCurrent-ed before
+	// Shutdown returns.  The worker calls CompleteCurrent synchronously after
+	// each dequeue, so the counts must be equal at this point.
+	if d, c := dequeued.Load(), completed.Load(); d != c {
+		t.Errorf("dequeued=%d completed=%d: Shutdown returned before all jobs were CompleteCurrent-ed", d, c)
+	}
 }
 
 // TestCleanURLPath covers the path-cleaning helper.

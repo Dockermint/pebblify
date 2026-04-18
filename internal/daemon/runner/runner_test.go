@@ -19,13 +19,14 @@ import (
 // dequeuing is the only blocking operation; all other state mutations are guarded
 // by mu so concurrent runner access under -race is safe.
 type fakeQueue struct {
-	mu      sync.Mutex
-	jobs    chan queue.Job
-	current *queue.Job
-	depth   int
-	closed  bool
-	// blocking is closed once Dequeue has blocked on the channel, signalling
-	// that the worker goroutine has reached the wait point.
+	mu           sync.Mutex
+	jobs         chan queue.Job
+	current      *queue.Job
+	depth        int
+	closed       bool
+	blockingOnce sync.Once
+	// blocking is closed exactly once when Dequeue first blocks on the channel,
+	// signalling that the worker goroutine has reached the wait point.
 	blocking chan struct{}
 }
 
@@ -52,12 +53,8 @@ func (q *fakeQueue) Enqueue(job queue.Job) error {
 }
 
 func (q *fakeQueue) Dequeue(ctx context.Context) (queue.Job, error) {
-	// Signal once that we have reached the blocking point.
-	select {
-	case <-q.blocking:
-	default:
-		close(q.blocking)
-	}
+	// Signal exactly once that we have reached the blocking point.
+	q.blockingOnce.Do(func() { close(q.blocking) })
 	select {
 	case <-ctx.Done():
 		return queue.Job{}, ctx.Err()

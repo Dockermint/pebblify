@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -136,34 +137,72 @@ func TestNew_UnknownModeReturnsError(t *testing.T) {
 
 // ---- TelegramNotifier ----
 
+// fakeTelegramServer wraps an httptest.Server and provides a mutex-safe getter
+// for the last recorded request body. Access to lastReq must be via Last().
+type fakeTelegramServer struct {
+	srv    *httptest.Server
+	mu     sync.Mutex
+	lastReq telegramRequest
+}
+
+// Last returns a copy of the last recorded telegram request under the mutex.
+func (f *fakeTelegramServer) Last() telegramRequest {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.lastReq
+}
+
 // newFakeTelegramServer returns a test server that records the last request body
 // and responds with the given status code.
-func newFakeTelegramServer(t *testing.T, status int) (*httptest.Server, *telegramRequest) {
+func newFakeTelegramServer(t *testing.T, status int) *fakeTelegramServer {
 	t.Helper()
-	var last telegramRequest
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		b, _ := io.ReadAll(r.Body)
-		_ = json.Unmarshal(b, &last)
+	f := &fakeTelegramServer{}
+	f.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("newFakeTelegramServer: read request body: %v", err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		var req telegramRequest
+		if err := json.Unmarshal(b, &req); err != nil {
+			t.Errorf("newFakeTelegramServer: unmarshal request body: %v", err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		f.mu.Lock()
+		f.lastReq = req
+		f.mu.Unlock()
 		w.WriteHeader(status)
-		_, _ = w.Write([]byte(`{"ok":true}`))
+		if _, err := w.Write([]byte(`{"ok":true}`)); err != nil {
+			t.Errorf("newFakeTelegramServer: write response: %v", err)
+		}
 	}))
-	t.Cleanup(srv.Close)
-	return srv, &last
+	t.Cleanup(f.srv.Close)
+	return f
 }
 
 // newFakeTelegramServerSequence responds with status codes in sequence.
 func newFakeTelegramServerSequence(t *testing.T, statuses []int) *httptest.Server {
 	t.Helper()
+	var mu sync.Mutex
 	idx := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		b, _ := io.ReadAll(r.Body)
-		_ = b
-		if idx < len(statuses) {
-			w.WriteHeader(statuses[idx])
-			idx++
-		} else {
-			w.WriteHeader(http.StatusInternalServerError)
+		b, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("newFakeTelegramServerSequence: read request body: %v", err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
 		}
+		_ = b
+		mu.Lock()
+		code := http.StatusInternalServerError
+		if idx < len(statuses) {
+			code = statuses[idx]
+			idx++
+		}
+		mu.Unlock()
+		w.WriteHeader(code)
 	}))
 	t.Cleanup(srv.Close)
 	return srv
@@ -223,9 +262,9 @@ func TestTelegramNotifier_MissingChannel(t *testing.T) {
 // TestTelegramNotifier_HappyPath sends a notification and verifies payload.
 func TestTelegramNotifier_HappyPath(t *testing.T) {
 	t.Parallel()
-	srv, last := newFakeTelegramServer(t, http.StatusOK)
+	f := newFakeTelegramServer(t, http.StatusOK)
 
-	n := newTelegramNotifierWithBase("tok", "42", srv.URL, nil)
+	n := newTelegramNotifierWithBase("tok", "42", f.srv.URL, nil)
 	ev := Event{
 		Kind:   EventCompleted,
 		JobID:  "job-123",
@@ -234,6 +273,7 @@ func TestTelegramNotifier_HappyPath(t *testing.T) {
 	if err := n.Notify(context.Background(), ev); err != nil {
 		t.Errorf("Notify() unexpected error: %v", err)
 	}
+	last := f.Last()
 	if last.ChatID != "42" {
 		t.Errorf("ChatID = %q, want %q", last.ChatID, "42")
 	}
@@ -280,9 +320,11 @@ func TestTelegramNotifier_TransientFailsBothAttempts(t *testing.T) {
 // TestTelegramNotifier_ContextCancelled returns context.Canceled.
 func TestTelegramNotifier_ContextCancelled(t *testing.T) {
 	t.Parallel()
-	// Slow server to ensure ctx cancellation wins.
+	// Server sleeps briefly; the context is already cancelled before Notify is
+	// called, so the HTTP client must surface the cancellation without actually
+	// waiting for the server response.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		time.Sleep(2 * time.Second)
+		time.Sleep(50 * time.Millisecond)
 		w.WriteHeader(http.StatusOK)
 	}))
 	t.Cleanup(srv.Close)

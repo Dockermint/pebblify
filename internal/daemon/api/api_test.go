@@ -35,6 +35,7 @@ func (q *fakeQueue) Dequeue(_ context.Context) (queue.Job, error) { return queue
 func (q *fakeQueue) Depth() int                                    { return q.depth }
 func (q *fakeQueue) Contains(_ string) bool                        { return q.containsOut }
 func (q *fakeQueue) Current() *queue.Job                           { return q.current }
+func (q *fakeQueue) CompleteCurrent()                              {}
 func (q *fakeQueue) Shutdown(_ context.Context) error              { return nil }
 
 // ---- helpers ----
@@ -301,7 +302,7 @@ func TestBasicAuth_Unsecure(t *testing.T) {
 	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
-	mw := basicAuth("secret", "unsecure", inner)
+	mw := basicAuth(nil, "secret", "unsecure", inner)
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rr := httptest.NewRecorder()
 	mw.ServeHTTP(rr, req)
@@ -316,7 +317,7 @@ func TestBasicAuth_BasicAuth_ValidPassword(t *testing.T) {
 	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
-	mw := basicAuth("secret", "basic_auth", inner)
+	mw := basicAuth(nil, "secret", "basic_auth", inner)
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.SetBasicAuth("ignored", "secret")
 	rr := httptest.NewRecorder()
@@ -332,7 +333,7 @@ func TestBasicAuth_BasicAuth_InvalidPassword(t *testing.T) {
 	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
-	mw := basicAuth("secret", "basic_auth", inner)
+	mw := basicAuth(nil, "secret", "basic_auth", inner)
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.SetBasicAuth("user", "wrongpassword")
 	rr := httptest.NewRecorder()
@@ -348,7 +349,7 @@ func TestBasicAuth_BearerToken_Valid(t *testing.T) {
 	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
-	mw := basicAuth("secret", "basic_auth", inner)
+	mw := basicAuth(nil, "secret", "basic_auth", inner)
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.Header.Set("Authorization", "Bearer secret")
 	rr := httptest.NewRecorder()
@@ -364,7 +365,7 @@ func TestBasicAuth_BearerToken_Invalid(t *testing.T) {
 	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
-	mw := basicAuth("secret", "basic_auth", inner)
+	mw := basicAuth(nil, "secret", "basic_auth", inner)
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.Header.Set("Authorization", "Bearer wrongtoken")
 	rr := httptest.NewRecorder()
@@ -380,7 +381,7 @@ func TestBasicAuth_NoCredentials(t *testing.T) {
 	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
-	mw := basicAuth("secret", "basic_auth", inner)
+	mw := basicAuth(nil, "secret", "basic_auth", inner)
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rr := httptest.NewRecorder()
 	mw.ServeHTTP(rr, req)
