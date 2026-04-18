@@ -18,7 +18,7 @@ func TestNew_NoTargetsEnabled(t *testing.T) {
 		SCP:         config.SCPSaveSection{Enable: false},
 		S3:          config.S3SaveSection{Enable: false},
 	}
-	_, err := store.New(cfg, config.Secrets{})
+	_, err := store.New(context.Background(), cfg, config.Secrets{}, nil)
 	if !errors.Is(err, store.ErrNoTargets) {
 		t.Errorf("New() error = %v, want %v", err, store.ErrNoTargets)
 	}
@@ -34,7 +34,7 @@ func TestNew_LocalOnlyProducesOneTarget(t *testing.T) {
 		SCP:         config.SCPSaveSection{Enable: false},
 		S3:          config.S3SaveSection{Enable: false},
 	}
-	targets, err := store.New(cfg, config.Secrets{})
+	targets, err := store.New(context.Background(), cfg, config.Secrets{}, nil)
 	if err != nil {
 		t.Fatalf("New() unexpected error: %v", err)
 	}
@@ -55,7 +55,7 @@ func TestNew_LocalEmptyDirReturnsError(t *testing.T) {
 		SCP:         config.SCPSaveSection{Enable: false},
 		S3:          config.S3SaveSection{Enable: false},
 	}
-	_, err := store.New(cfg, config.Secrets{})
+	_, err := store.New(context.Background(), cfg, config.Secrets{}, nil)
 	if err == nil {
 		t.Fatal("New() expected error for empty local dir, got nil")
 	}
@@ -75,7 +75,7 @@ func TestNew_S3MissingBucketReturnsError(t *testing.T) {
 		},
 	}
 	secrets := config.Secrets{S3SecretKey: "secret"}
-	_, err := store.New(cfg, secrets)
+	_, err := store.New(context.Background(), cfg, secrets, nil)
 	if err == nil {
 		t.Fatal("New() expected error for empty bucket, got nil")
 	}
