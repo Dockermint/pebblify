@@ -8,8 +8,12 @@ ARG TARGETARCH
 ARG VERSION=dev
 ARG REVISION=unknown
 
-# hadolint ignore=DL3018,SC2261
-RUN apk add --no-cache ca-certificates>=20260413 tzdata>=2026a
+# Alpine package pins are exact (including -rN revision). Rotation to a new
+# revision will break this build; bump manually on Alpine package updates.
+# Automated bumps deferred to v0.5.x (Renovate config).
+RUN apk add --no-cache \
+        ca-certificates=20260413-r0 \
+        tzdata=2026a-r0
 
 WORKDIR /build
 
@@ -46,11 +50,13 @@ LABEL org.opencontainers.image.title="Pebblify" \
       org.opencontainers.image.created="${CREATED}" \
       org.opencontainers.image.base.name="alpine:3.22"
 
-# hadolint ignore=DL3018,SC2261
+# Alpine package pins are exact (including -rN revision). Rotation to a new
+# revision will break this build; bump manually on Alpine package updates.
+# Automated bumps deferred to v0.5.x (Renovate config).
 RUN apk add --no-cache \
-        ca-certificates>=20260413 \
-        tzdata>=2026a \
-        wget>=1.25.0 \
+        ca-certificates=20260413-r0 \
+        tzdata=2026a-r0 \
+        wget=1.25.0-r1 \
     && addgroup -g 10000 pebblify \
     && adduser -D -H -u 10000 -G pebblify -s /sbin/nologin pebblify
 
