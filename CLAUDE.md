@@ -137,7 +137,7 @@ Each agent got **exclusive write scope**. No two agents write same files.
 | `docs/specs/`, `docs/ROADMAP.md`                 | `software-architect` | Read-only|
 | `docs/markdown/`, `docs/docusaurus/`, `README`   | `technical-writer` | Read-only  |
 | `.github/`                                       | `devops`           | Read-only  |
-| `Dockerfile*`, `docker-compose*.yml`, `**/*.container`, `**/*.pod`, `**/*.volume`, `**/*.network`, `.dockerignore` | `container-engineer` | Read-only |
+| Dockerfile*, docker-compose*.yml, **/*.container, **/*.pod, **/*.volume, **/*.network, **/*.service, **/*.socket, **/*.timer, systemd/**, .dockerignore | container-engineer | Read-only |
 | Git operations                                   | `sysadmin`         | Forbidden  |
 | Web research                                     | `assistant`        | Forbidden  |
 
@@ -148,6 +148,10 @@ Each agent got **exclusive write scope**. No two agents write same files.
 - **Architecture questions**: `@software-architect` always ask CEO for unspecified requirements, never invent.
 - **Container/Docker work**: `@container-engineer` = sole producer of container artifacts.
 - **Retrocontrol**: `@it-consultant` propose rule tightenings, **NEVER** relax.
+
+### Security
+
+- **Environment templates**: `.env.example`, `systemd/*.env.example` must contain placeholders only. No real secrets, API keys, passwords, or PII. Format: `VAR_NAME=` (empty) or `VAR_NAME={{placeholder}}`. Pre-commit verify no secrets leaked via templates.                                                                      
 
 ### Rules for All Agents
 
