@@ -46,6 +46,8 @@ func main() {
 		verifyCmd(os.Args[2:])
 	case "completion":
 		completionCmd(os.Args[2:])
+	case "daemon":
+		runDaemon(os.Args[2:])
 	case "-h", "--help", "help":
 		usage()
 	default:
@@ -73,6 +75,7 @@ Commands:
   recover           Resume a previously interrupted conversion
   verify            Verify that converted data matches the source
   completion        Generate or install shell completion scripts
+  daemon            Run the Pebblify HTTP daemon (Linux only, config via config.toml)
   version           Show version information
 
 Options for level-to-pebble:
