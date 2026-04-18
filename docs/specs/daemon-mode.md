@@ -2,7 +2,7 @@
 
 Owner: `@software-architect`
 Date: 2026-04-18
-Last revised: 2026-04-18 (CEO decisions locked — see section "CEO Decisions Locked 2026-04-18")
+Last revised: 2026-04-18 (CEO decisions locked — see section "CEO Decisions Locked 2026-04-18"; CEO amendment 2026-04-18: API always-on)
 Feature branch: `feat/daemon-mode`
 Implementation owner: `@go-developer`, `@lead-dev`, `@container-engineer`
 
@@ -21,6 +21,8 @@ The five open questions from the initial draft were answered by the CEO on 2026-
 4. **systemd unit ownership**: Reassigned to `@container-engineer`. See "systemd Unit Ownership" section and the CLAUDE.md scope amendment flag.
 
 5. **Platform**: Daemon is Linux-only. macOS users run the daemon via Docker or Podman. The `install-cli` target remains cross-platform (all four build targets). `install-systemd-daemon` is Linux-only. There is no `install-launchd-daemon` target in v0.4.0 or any planned release.
+
+6. **API always-on** *(CEO amendment 2026-04-18)*: `[api].enable` field removed. The HTTP API is unconditionally active in daemon mode. Without the API the daemon cannot receive jobs and is useless; an opt-out flag would be a footgun. `host`, `port`, and `authentification_mode` remain configurable.
 
 ---
 
@@ -82,6 +84,12 @@ type Notifier interface {
 
 Implementations: `TelegramNotifier`, `NoopNotifier`.
 
+**`TelegramNotifier` implementation** (`internal/daemon/notify/telegram.go`):
+- Uses `net/http.Client` directly against `https://api.telegram.org/bot<token>/sendMessage`. No third-party Telegram library.
+- Inputs: `PEBBLIFY_TELEGRAM_BOT_TOKEN` env var (bot token) + `notify.channel_id` config field (chat ID). Both are required when `notify.enable = true` and `notify.mode = "telegram"`; missing either is a fatal startup error.
+- Retry policy: on HTTP 5xx response, retry once after an exponential backoff interval (base 2 s, factor 2). On HTTP 4xx response, log at ERROR level and return immediately (permanent failure — no retry). Notification failure is non-fatal to the job pipeline: the worker logs the error and continues.
+- The bot token is never logged. Log lines reference only the chat ID and HTTP status code.
+
 **Extension path**: to add a new backend (webhook, Slack, PagerDuty) in a future release:
 1. Create a new file in `internal/daemon/notify/` implementing `Notifier`.
 2. Add a new enum value to `config.notify.mode`.
@@ -129,7 +137,6 @@ Default path: `./config.toml`. Overridden by `PEBBLIFY_CONFIG_PATH` env var.
 config_version = 0
 
 [api]
-enable = false
 host = "127.0.0.1"
 port = 2324
 authentification_mode = "basic_auth"  # basic_auth | unsecure
@@ -250,7 +257,7 @@ Prometheus gauge `pebblify_daemon_queue_depth` mirrors `queue_depth` in real tim
 
 ### Listener
 
-Bound to `api.host:api.port`. Enabled only when `api.enable = true`.
+Bound to `api.host:api.port`. Always active in daemon mode; no enable flag.
 
 HTTP/1.1, no TLS (operators terminate TLS at a reverse proxy). Future versions may add TLS config.
 
@@ -511,7 +518,7 @@ Installs daemon for system-wide use under systemd. **Linux-only**. Requires root
 Requirements:
 - Binary installed to `/usr/local/bin/pebblify`.
 - Creates `/etc/pebblify/` directory (mode 0750, owned root:root).
-- Creates `/etc/pebblify/config.toml` from an embedded template with sane defaults (api.enable=false, health.enable=true, telemetry.enable=true). Does NOT overwrite if file already exists.
+- Creates `/etc/pebblify/config.toml` from an embedded template with sane defaults (health.enable=true, telemetry.enable=true). Does NOT overwrite if file already exists.
 - Copies `systemd/pebblify.env.example` to `/etc/pebblify/.env`. Mode 0600, owned root:root. Does NOT overwrite if file already exists.
 - Copies `systemd/pebblify.service` (authored by `@container-engineer`) to `/etc/systemd/system/pebblify.service`. Does NOT overwrite if file already exists.
 - Does NOT run `systemctl enable` or `systemctl start`. The operator does this manually.
@@ -594,10 +601,10 @@ Existing cases (`level-to-pebble`, `recover`, `verify`, `completion`) are not mo
 | :------------------------- | :------------------------------------------------------- | :------------- | :------------- |
 | TOML parsing               | `github.com/BurntSushi/toml` v1.x                        | `@lead-dev`    | Pending eval   |
 | S3 uploads                 | `github.com/aws/aws-sdk-go-v2/config` + `credentials` + `service/s3` | `@lead-dev` | **CEO confirmed** — only these 3 sub-modules |
-| Telegram notify            | `github.com/go-telegram-bot-api/telegram-bot-api/v5`     | `@lead-dev`    | Pending eval   |
+| Telegram notify            | `net/http` + `encoding/json` (stdlib only)               | `@lead-dev`    | **CEO locked** — no third-party lib; `go-telegram-bot-api/v5` rejected (abandoned, last release 2021-12-13) |
 | SCP / SSH transport        | `golang.org/x/crypto/ssh`                                | `@lead-dev`    | Pending eval   |
 
-The `aws-sdk-go-v2` fallback (hand-rolled SigV4) is removed from scope; CEO confirmed the library. For Telegram, if `@lead-dev` rejects `go-telegram-bot-api`, the fallback is raw Telegram Bot API over `net/http` with `encoding/json`. Zero additional deps.
+The `aws-sdk-go-v2` fallback (hand-rolled SigV4) is removed from scope; CEO confirmed the library. Telegram implementation uses `net/http` + `encoding/json` (stdlib only); `go-telegram-bot-api/v5` is rejected as abandoned. Zero additional deps for notification.
 
 ---
 
@@ -605,7 +612,7 @@ The `aws-sdk-go-v2` fallback (hand-rolled SigV4) is removed from scope; CEO conf
 
 | Agent               | Scope files                                                                             | Action                                                    |
 | :------------------ | :-------------------------------------------------------------------------------------- | :-------------------------------------------------------- |
-| `@lead-dev`         | `go.mod`, `go.sum`, `Makefile`                                                          | Add deps (3 aws sub-modules only); add install-cli, install-systemd-daemon (Linux-only) |
+| `@lead-dev`         | `go.mod`, `go.sum`, `Makefile`                                                          | Add deps (3 aws sub-modules + x/crypto only; no Telegram lib); add install-cli, install-systemd-daemon (Linux-only) |
 | `@go-developer`     | `internal/daemon/**/*.go`, `cmd/pebblify/main.go`                                       | Implement all packages and CLI wiring; add linux build tag to daemon.go |
 | `@container-engineer` | `docker-compose.daemon.yml`, `systemd/pebblify.service`, `systemd/pebblify.env.example` | Produce compose file + systemd unit + env stub (pending CLAUDE.md scope amendment) |
 | `@qa`               | `internal/daemon/**/*_test.go`                                                          | Unit + integration tests; mutation testing                |
