@@ -20,6 +20,7 @@ import (
 	"time"
 )
 
+
 // Sentinel errors returned by Queue operations.
 var (
 	// ErrDuplicate indicates the job's canonicalized URL is already running or queued.
@@ -71,6 +72,10 @@ type Queue interface {
 	// Current returns a copy of the job currently being processed, or nil if
 	// idle.
 	Current() *Job
+	// CompleteCurrent clears the current-job slot so Shutdown can return and
+	// Current reports nil until the next Dequeue. Implementations must be
+	// idempotent.
+	CompleteCurrent()
 	// Shutdown closes the queue to new submissions and blocks until either the
 	// in-flight job completes or ctx is cancelled. Pending (not-yet-started)
 	// jobs are dropped; the returned error is ctx.Err() if the wait times out.
@@ -88,13 +93,22 @@ type Options struct {
 
 // FIFOQueue is a Queue backed by a buffered channel and a map of canonical
 // URLs for dedup lookups. All exported methods are safe for concurrent use.
+//
+// A sync.Cond (cond) attached to mu lets waitForCurrent block until either the
+// in-flight slot clears or a dequeue handoff completes, without polling. The
+// handoff counter tracks receives from the channel that have not yet been
+// reflected in current; Shutdown treats (handoff > 0 || current != nil) as
+// in-flight, closing the race where the worker has pulled a job off ch but has
+// not yet acquired mu to mark it current.
 type FIFOQueue struct {
-	ch      chan Job
-	logger  *slog.Logger
-	mu      sync.Mutex
-	pending map[string]struct{} // canonical URL -> {} for pending jobs
-	current *Job                // nil when idle
-	closed  bool
+	ch       chan Job
+	logger   *slog.Logger
+	mu       sync.Mutex
+	cond     *sync.Cond
+	pending  map[string]struct{} // canonical URL -> {} for pending jobs
+	current  *Job                // nil when idle
+	handoff  int                 // receives in flight but not yet marked current
+	closed   bool
 }
 
 // New returns an initialized FIFOQueue. BufferSize is clamped to a minimum of 1.
@@ -107,11 +121,13 @@ func New(opts Options) *FIFOQueue {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &FIFOQueue{
+	q := &FIFOQueue{
 		ch:      make(chan Job, size),
 		logger:  logger,
 		pending: make(map[string]struct{}),
 	}
+	q.cond = sync.NewCond(&q.mu)
+	return q
 }
 
 // Enqueue implements Queue.
@@ -151,33 +167,59 @@ func (q *FIFOQueue) Enqueue(job Job) error {
 	}
 }
 
-// Dequeue implements Queue. The returned job is marked current and removed from
-// the pending dedup set; the worker must call CompleteCurrent when the job
-// finishes (success or failure) to clear the current slot.
+// Dequeue implements Queue. The returned job is marked current and removed
+// from the pending dedup set; the worker must call CompleteCurrent when the
+// job finishes (success or failure) to clear the current slot.
+//
+// A handoff counter is incremented before the blocking receive so Shutdown
+// observes the receiver as "in flight" even in the window between a successful
+// channel receive and the subsequent mutex acquisition. If ctx fires or the
+// channel is closed before a job is delivered, the counter is decremented and
+// waitForCurrent is signalled so Shutdown can make progress.
 func (q *FIFOQueue) Dequeue(ctx context.Context) (Job, error) {
+	q.mu.Lock()
+	q.handoff++
+	q.mu.Unlock()
+
 	select {
 	case <-ctx.Done():
+		q.releaseHandoff(nil)
 		return Job{}, ctx.Err()
 	case job, ok := <-q.ch:
 		if !ok {
+			q.releaseHandoff(nil)
 			return Job{}, ErrShuttingDown
 		}
-		canonical, _ := Canonicalize(job.URL)
-		q.mu.Lock()
-		delete(q.pending, canonical)
 		jobCopy := job
-		q.current = &jobCopy
-		q.mu.Unlock()
+		q.releaseHandoff(&jobCopy)
 		return job, nil
 	}
 }
 
-// CompleteCurrent clears the current job slot. The worker calls this after
-// finishing (or failing) the job returned from Dequeue so Current() reports nil
-// until the next dequeue.
+// releaseHandoff decrements the handoff counter and either marks current (when
+// current is non-nil and a job was delivered) or leaves the slot idle. The
+// condition variable is broadcast in both cases so waitForCurrent revisits its
+// predicate. The canonical URL is removed from pending only when a job is
+// handed off; the drop-on-shutdown path owns its own pending deletion.
+func (q *FIFOQueue) releaseHandoff(job *Job) {
+	q.mu.Lock()
+	q.handoff--
+	if job != nil {
+		if canonical, err := Canonicalize(job.URL); err == nil {
+			delete(q.pending, canonical)
+		}
+		q.current = job
+	}
+	q.cond.Broadcast()
+	q.mu.Unlock()
+}
+
+// CompleteCurrent clears the current job slot and signals any goroutine
+// blocked in waitForCurrent so Shutdown can return promptly.
 func (q *FIFOQueue) CompleteCurrent() {
 	q.mu.Lock()
 	q.current = nil
+	q.cond.Broadcast()
 	q.mu.Unlock()
 }
 
@@ -219,8 +261,10 @@ func (q *FIFOQueue) Current() *Job {
 
 // Shutdown implements Queue. Once invoked, further Enqueue calls return
 // ErrShuttingDown. Pending buffered jobs are drained from the channel and
-// logged as dropped. The call then blocks until the in-flight job (if any)
-// clears via CompleteCurrent or ctx is cancelled.
+// logged as dropped. The call then blocks until every in-flight receive has
+// either been marked current and subsequently completed, or the handoff has
+// been released on a ctx/close path. ctx cancellation during the wait returns
+// ctx.Err() without forcing the in-flight job to stop.
 func (q *FIFOQueue) Shutdown(ctx context.Context) error {
 	q.mu.Lock()
 	if q.closed {
@@ -229,6 +273,7 @@ func (q *FIFOQueue) Shutdown(ctx context.Context) error {
 	}
 	q.closed = true
 	close(q.ch)
+	q.cond.Broadcast()
 	q.mu.Unlock()
 
 	q.drainPending()
@@ -238,35 +283,68 @@ func (q *FIFOQueue) Shutdown(ctx context.Context) error {
 
 // drainPending removes any buffered jobs left in the channel after close and
 // logs each one as dropped. Called with the queue already marked closed so no
-// new jobs can be pushed.
+// new jobs can be pushed. Logged URLs are redacted so userinfo, query strings,
+// and fragments that may carry secrets are never persisted to logs.
 func (q *FIFOQueue) drainPending() {
 	for job := range q.ch {
 		canonical, _ := Canonicalize(job.URL)
 		q.mu.Lock()
 		delete(q.pending, canonical)
 		q.mu.Unlock()
-		q.logger.Warn("queue job dropped on shutdown", "job_id", job.ID, "url", job.URL)
+		q.logger.Warn("queue job dropped on shutdown",
+			"job_id", job.ID, "url", RedactURL(job.URL))
 	}
 }
 
-// waitForCurrent polls the current-job slot with a short ticker until the
-// worker clears it or ctx is done.
+// waitForCurrent blocks until both q.current is nil and q.handoff is zero, or
+// ctx fires. The condition variable is broadcast by releaseHandoff and
+// CompleteCurrent so the happy path is event-driven; a short ticker runs in a
+// helper goroutine solely to wake the wait on ctx cancellation without
+// requiring callers of CompleteCurrent to know about ctx.
 func (q *FIFOQueue) waitForCurrent(ctx context.Context) error {
-	ticker := time.NewTicker(50 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		q.mu.Lock()
-		done := q.current == nil
-		q.mu.Unlock()
-		if done {
-			return nil
-		}
+	done := make(chan struct{})
+	defer close(done)
+
+	// Bridge ctx.Done into a cond broadcast so the waiter unblocks promptly
+	// on cancellation without the per-caller ticker that the polling version
+	// needed. A single goroutine suffices since Shutdown is called at most
+	// once per queue instance.
+	go func() {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
-		case <-ticker.C:
+		case <-done:
+			return
 		}
+		q.mu.Lock()
+		q.cond.Broadcast()
+		q.mu.Unlock()
+	}()
+
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	for q.current != nil || q.handoff > 0 {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		q.cond.Wait()
 	}
+	return ctx.Err()
+}
+
+// RedactURL returns a log-safe form of raw with userinfo, query string, and
+// fragment stripped. On parse failure the placeholder "[invalid-url]" is
+// returned so logs and notifications never leak attacker-supplied payload
+// fragments verbatim. Consumers must prefer this helper over logging raw job
+// URLs.
+func RedactURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "[invalid-url]"
+	}
+	u.User = nil
+	u.RawQuery = ""
+	u.Fragment = ""
+	return u.String()
 }
 
 // Canonicalize returns a stable string form of rawURL for duplicate detection.

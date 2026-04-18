@@ -351,8 +351,8 @@ func expandHome(p string) (string, error) {
 
 // validate enforces cross-field invariants defined in the daemon spec.
 func validate(cfg *Config, secrets Secrets) error {
-	if cfg.General.ConfigVersion > SupportedConfigVersion {
-		return fmt.Errorf("%w: got %d, max %d", ErrUnsupportedConfigVersion,
+	if cfg.General.ConfigVersion != SupportedConfigVersion {
+		return fmt.Errorf("%w: got %d, want %d", ErrUnsupportedConfigVersion,
 			cfg.General.ConfigVersion, SupportedConfigVersion)
 	}
 

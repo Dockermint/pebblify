@@ -11,6 +11,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 
 	"github.com/Dockermint/Pebblify/internal/daemon/config"
 	"github.com/Dockermint/Pebblify/internal/daemon/store/local"
@@ -53,10 +54,20 @@ var ErrNoTargets = errors.New("no save targets enabled")
 // order (local, scp, s3) so log output remains deterministic. A configuration
 // with zero enabled targets returns ErrNoTargets.
 //
+// ctx bounds construction-time I/O (e.g. s3 region lookup via the AWS SDK
+// default config chain). logger is forwarded to target constructors that
+// emit structured logs from their own code paths; a nil logger falls back to
+// slog.Default so callers wiring a minimal daemon do not need to synthesize
+// one.
+//
 // Each sub-constructor performs its own validation; errors propagate verbatim
 // wrapped with a target-identifying prefix so operators can pinpoint the
 // misconfigured section.
-func New(cfg config.SaveSection, secrets config.Secrets) ([]Target, error) {
+func New(ctx context.Context, cfg config.SaveSection, secrets config.Secrets,
+	logger *slog.Logger) ([]Target, error) {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	targets := make([]Target, 0, 3)
 
 	if cfg.Local.Enable {
@@ -76,7 +87,7 @@ func New(cfg config.SaveSection, secrets config.Secrets) ([]Target, error) {
 	}
 
 	if cfg.S3.Enable {
-		t, err := s3.New(cfg.S3, secrets)
+		t, err := s3.New(ctx, cfg.S3, secrets, logger)
 		if err != nil {
 			return nil, fmt.Errorf("store s3: %w", err)
 		}

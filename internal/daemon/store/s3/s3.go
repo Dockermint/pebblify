@@ -66,7 +66,14 @@ type S3Target struct {
 // (public) and secrets.S3SecretKey (private). The AWS SDK loads additional
 // shared config from the environment; the caller's explicit static
 // credentials override anything in ~/.aws/credentials for this client.
-func New(cfg config.S3SaveSection, secrets config.Secrets) (*S3Target, error) {
+//
+// logger is the request-scoped daemon logger used for region resolution
+// diagnostics. A nil logger falls back to slog.Default so misuse never
+// panics. The construction context (ctx) bounds the single
+// awsconfig.LoadDefaultConfig call; callers are expected to pass a context
+// with a sensible deadline during daemon startup.
+func New(ctx context.Context, cfg config.S3SaveSection, secrets config.Secrets,
+	logger *slog.Logger) (*S3Target, error) {
 	if cfg.BucketName == "" {
 		return nil, fmt.Errorf("%w: bucket_name must not be empty", ErrInvalidConfig)
 	}
@@ -76,13 +83,15 @@ func New(cfg config.S3SaveSection, secrets config.Secrets) (*S3Target, error) {
 	if secrets.S3SecretKey == "" {
 		return nil, fmt.Errorf("%w: S3 secret key", ErrMissingSecret)
 	}
+	if logger == nil {
+		logger = slog.Default()
+	}
 
-	logger := slog.Default()
-	region := resolveRegion(context.Background(), logger)
+	region := resolveRegion(ctx, logger)
 
 	provider := credentials.NewStaticCredentialsProvider(cfg.S3AccessKey, secrets.S3SecretKey, "")
 
-	awsCfg, err := awsconfig.LoadDefaultConfig(context.Background(),
+	awsCfg, err := awsconfig.LoadDefaultConfig(ctx,
 		awsconfig.WithRegion(region),
 		awsconfig.WithCredentialsProvider(provider),
 	)

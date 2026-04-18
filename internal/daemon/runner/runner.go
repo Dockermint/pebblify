@@ -171,21 +171,12 @@ func (r *jobRunner) Stop(ctx context.Context) error {
 	}
 }
 
-// completer is the optional interface the FIFOQueue satisfies so the runner
-// can clear the queue's current-job slot without leaking the concrete type
-// into the Runner API.
-type completer interface {
-	CompleteCurrent()
-}
-
 // processJob runs the full pipeline for a single job. Fatal and non-fatal
 // errors are both demoted to per-job failure events; the daemon never exits
 // on a job error.
 func (r *jobRunner) processJob(ctx context.Context, job queue.Job) {
 	defer func() {
-		if c, ok := r.deps.Queue.(completer); ok {
-			c.CompleteCurrent()
-		}
+		r.deps.Queue.CompleteCurrent()
 		r.deps.Collectors.RecordDequeue(r.deps.Queue.Depth())
 	}()
 
@@ -285,11 +276,13 @@ func (r *jobRunner) safeNotify(ctx context.Context, event notify.Event) error {
 	return r.deps.Notifier.Notify(ctx, event)
 }
 
-// failJob emits a Failed notification and logs the error.
+// failJob emits a Failed notification and logs the error. The error is routed
+// exclusively through slog so operators receive the structured payload
+// (handler-specific formatting, log correlation) and no raw stderr write can
+// re-introduce the URL leak that redactedJobURL guards against.
 func (r *jobRunner) failJob(ctx context.Context, logger *slog.Logger,
 	job queue.Job, cause error) {
 	logger.Error("job failed", "error", cause)
-	fmt.Fprintf(os.Stderr, "pebblify daemon: job %s failed: %v\n", job.ID, cause)
 	if err := r.safeNotify(ctx, notify.Event{
 		Kind:   notify.EventFailed,
 		JobID:  job.ID,
@@ -605,19 +598,12 @@ func urlBasename(raw string) string {
 	return base
 }
 
-// redactedJobURL returns a log-safe form of raw with userinfo, query string,
-// and fragment stripped. On parse failure the placeholder "[invalid-url]" is
-// returned so logs and notifications never leak attacker-supplied payload
-// fragments verbatim.
+// redactedJobURL returns a log-safe form of raw. The implementation delegates
+// to queue.RedactURL so every logger in the daemon emits the same redaction
+// shape; keeping the runner-local wrapper avoids churning the call sites that
+// already pass a package-internal name.
 func redactedJobURL(raw string) string {
-	u, err := url.Parse(raw)
-	if err != nil {
-		return "[invalid-url]"
-	}
-	u.User = nil
-	u.RawQuery = ""
-	u.Fragment = ""
-	return u.String()
+	return queue.RedactURL(raw)
 }
 
 // findLevelDBRoot locates a directory under root that contains one or more

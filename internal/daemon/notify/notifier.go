@@ -99,7 +99,7 @@ func New(cfg config.NotifySection, secrets config.Secrets) (Notifier, error) {
 func renderMessage(event Event) string {
 	header := fmt.Sprintf("<b>Pebblify job %s</b>", event.Kind)
 	body := fmt.Sprintf("ID: <code>%s</code>\nURL: %s",
-		event.JobID, html.EscapeString(event.JobURL))
+		html.EscapeString(event.JobID), html.EscapeString(event.JobURL))
 	if event.Details != "" {
 		body += "\n" + html.EscapeString(event.Details)
 	}

@@ -84,7 +84,7 @@ func New(cfg config.APISection, secrets config.Secrets, q queue.Queue,
 	mux.HandleFunc("/v1/jobs", h.handleJobs)
 	mux.HandleFunc("/v1/status", h.handleStatus)
 
-	authenticated := basicAuth(secrets.BasicAuthToken, cfg.AuthentificationMode, mux)
+	authenticated := basicAuth(logger, secrets.BasicAuthToken, cfg.AuthentificationMode, mux)
 	logged := logRequests(logger, authenticated)
 	protected := recoverPanic(logger, logged)
 

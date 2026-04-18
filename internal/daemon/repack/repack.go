@@ -287,7 +287,19 @@ func writeTarSymlink(tw *tar.Writer, abs, rel string, info os.FileInfo) error {
 
 // Extract decompresses archivePath into destDir. The format is detected from
 // the first bytes of the file; unknown magic returns ErrUnknownFormat.
-// Archive entries that resolve outside destDir return ErrUnsafePath.
+//
+// Only USTAR/PAX/GNU-marked tar streams (FormatTar, FormatTarGzip,
+// FormatTarZstd, FormatTarLZ4) and zip archives are accepted. Pre-POSIX v7
+// tar streams without a USTAR signature at offset 257 are rejected with
+// ErrUnknownFormat; callers must repack such archives with a modern tar
+// before passing them through the daemon.
+//
+// Symlink entries are rejected. Hard-link entries are rejected. Absolute tar
+// paths and any entry that resolves outside destDir are rejected with
+// ErrUnsafePath. Non-regular, non-directory, non-link special entries
+// (character device, block device, FIFO) are rejected with ErrUnsafePath so
+// the extraction never materializes partial metadata the daemon cannot
+// support.
 func Extract(ctx context.Context, archivePath, destDir string) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -479,8 +491,16 @@ func writeTarEntry(tr *tar.Reader, hdr *tar.Header, destDir string) error {
 	case tar.TypeSymlink:
 		return fmt.Errorf("%w: symlink entry %s (target %s); symlinks not allowed",
 			ErrUnsafePath, hdr.Name, hdr.Linkname)
+	case tar.TypeLink:
+		return fmt.Errorf("%w: hard-link entry %s (target %s); hard links not allowed",
+			ErrUnsafePath, hdr.Name, hdr.Linkname)
 	default:
-		return nil
+		// Character, block, FIFO, and any other non-regular entries are
+		// silently dangerous: they either attempt device access or carry
+		// metadata that escapes the extraction sandbox. Reject them so the
+		// archive is never partially materialized in an inconsistent state.
+		return fmt.Errorf("%w: unsupported tar entry %s (typeflag=%d)",
+			ErrUnsafePath, hdr.Name, hdr.Typeflag)
 	}
 }
 

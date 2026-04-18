@@ -8,6 +8,7 @@ package scp
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -18,6 +19,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/crypto/ssh"
@@ -25,6 +27,12 @@ import (
 
 	"github.com/Dockermint/Pebblify/internal/daemon/config"
 )
+
+// stderrCaptureLimit caps how many bytes of remote scp stderr are preserved
+// for error-wrapping. Remote peers that spew megabytes of diagnostics would
+// otherwise inflate the error chain; 4 KiB is enough to surface the first
+// diagnostic line without unbounded memory growth.
+const stderrCaptureLimit = 4 << 10
 
 // Name is the Target identifier reported by SCPTarget.Name.
 const Name = "scp"
@@ -256,6 +264,12 @@ func dialContext(ctx context.Context, network, addr string, cfg *ssh.ClientConfi
 // runSCPSink drives the remote scp -t sink process through a single-file
 // transfer. The protocol reference is openssh scp(1) + source code at
 // openssh-portable/scp.c.
+//
+// Remote stderr is captured into a bounded buffer so errors returned from
+// transferFile and session.Wait can include the peer's diagnostic text
+// (e.g. "permission denied", "No such file or directory"). A background
+// goroutine drains the stderr pipe; a WaitGroup ensures the capture is
+// complete before any error is annotated.
 func runSCPSink(ctx context.Context, session *ssh.Session, localPath string,
 	info os.FileInfo, remotePath string) error {
 	remoteDir, remoteFile := path.Split(remotePath)
@@ -272,28 +286,61 @@ func runSCPSink(ctx context.Context, session *ssh.Session, localPath string,
 		_ = stdin.Close()
 		return fmt.Errorf("scp sink: stdout: %w", err)
 	}
+	stderr, err := session.StderrPipe()
+	if err != nil {
+		_ = stdin.Close()
+		return fmt.Errorf("scp sink: stderr: %w", err)
+	}
 	reader := bufio.NewReader(stdout)
+
+	var stderrBuf bytes.Buffer
+	var stderrWG sync.WaitGroup
+	stderrWG.Add(1)
+	go func() {
+		defer stderrWG.Done()
+		_, _ = io.Copy(&stderrBuf, io.LimitReader(stderr, stderrCaptureLimit))
+		_, _ = io.Copy(io.Discard, stderr)
+	}()
 
 	cmd := "scp -t " + shellQuote(remoteDir)
 	if err := session.Start(cmd); err != nil {
 		_ = stdin.Close()
-		return fmt.Errorf("scp sink: start: %w", err)
+		stderrWG.Wait()
+		return annotateWithStderr(fmt.Errorf("scp sink: start: %w", err), &stderrBuf)
 	}
 
 	if err := transferFile(ctx, stdin, reader, localPath, info, remoteFile); err != nil {
 		_ = stdin.Close()
 		_ = session.Wait()
-		return err
+		stderrWG.Wait()
+		return annotateWithStderr(err, &stderrBuf)
 	}
 
 	if err := stdin.Close(); err != nil {
 		_ = session.Wait()
-		return fmt.Errorf("scp sink: close stdin: %w", err)
+		stderrWG.Wait()
+		return annotateWithStderr(fmt.Errorf("scp sink: close stdin: %w", err), &stderrBuf)
 	}
-	if err := session.Wait(); err != nil {
-		return fmt.Errorf("scp sink: remote exit: %w", err)
+	waitErr := session.Wait()
+	stderrWG.Wait()
+	if waitErr != nil {
+		return annotateWithStderr(fmt.Errorf("scp sink: remote exit: %w", waitErr), &stderrBuf)
 	}
 	return nil
+}
+
+// annotateWithStderr augments err with the trimmed contents of buf when it
+// carries non-empty diagnostic text. The buffer itself is bounded by
+// stderrCaptureLimit so the resulting error chain cannot grow without bound.
+func annotateWithStderr(err error, buf *bytes.Buffer) error {
+	if err == nil {
+		return nil
+	}
+	msg := strings.TrimSpace(buf.String())
+	if msg == "" {
+		return err
+	}
+	return fmt.Errorf("%w: remote stderr: %s", err, msg)
 }
 
 // transferFile executes the scp sink dance: wait for ack, send C-line,
@@ -374,17 +421,22 @@ func readAck(r *bufio.Reader) error {
 // contain path separators so attacker-controlled input cannot escape the
 // configured remote base directory when the name is path.Join'd into the scp
 // command line.
+//
+// filepath.Base stripping both POSIX and Windows separators already covers
+// the "bare filename" invariant; a separate strings.Contains guard catches
+// Windows "\\" on Unix hosts where filepath.Base is POSIX-only and would not
+// treat backslash as a separator.
 func validateRemoteName(remoteName string) error {
 	if remoteName == "" {
 		return errors.New("remoteName must not be empty")
 	}
-	if filepath.IsAbs(remoteName) || strings.HasPrefix(remoteName, "/") {
+	if filepath.IsAbs(remoteName) {
 		return fmt.Errorf("remoteName %q must not be absolute", remoteName)
 	}
 	if filepath.Base(remoteName) != remoteName {
 		return fmt.Errorf("remoteName %q must be a bare filename", remoteName)
 	}
-	if strings.ContainsAny(remoteName, "/\\") {
+	if strings.Contains(remoteName, "\\") {
 		return fmt.Errorf("remoteName %q must not contain path separators", remoteName)
 	}
 	if remoteName == "." || remoteName == ".." {

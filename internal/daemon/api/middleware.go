@@ -89,7 +89,7 @@ func recoverPanic(logger *slog.Logger, next http.Handler) http.Handler {
 					"method", r.Method,
 					"panic", rec,
 				)
-				writeJSONError(w, http.StatusInternalServerError, "internal server error")
+				writeJSONError(logger, w, http.StatusInternalServerError, "internal server error")
 			}
 		}()
 		next.ServeHTTP(w, r)
@@ -101,14 +101,20 @@ func recoverPanic(logger *slog.Logger, next http.Handler) http.Handler {
 // header whose password matches token, or a Bearer token that matches token.
 // Token comparison is constant-time. When mode=unsecure, the middleware is a
 // pass-through; the caller is expected to log a startup warning once.
-func basicAuth(token, mode string, next http.Handler) http.Handler {
+//
+// A nil logger is tolerated: write failures fall back to slog.Default so the
+// middleware never panics on a misuse path.
+func basicAuth(logger *slog.Logger, token, mode string, next http.Handler) http.Handler {
 	if mode == config.APIAuthUnsecure {
 		return next
+	}
+	if logger == nil {
+		logger = slog.Default()
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !checkAuth(r, token) {
 			w.Header().Set("WWW-Authenticate", `Basic realm="pebblify"`)
-			writeJSONError(w, http.StatusUnauthorized, "unauthorized")
+			writeJSONError(logger, w, http.StatusUnauthorized, "unauthorized")
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -178,7 +184,10 @@ func splitAuthzHeader(h string) (scheme, creds string, ok bool) {
 // writeJSONError writes a JSON error body with the given status. json.Marshal
 // is used on a value holding the caller-supplied message so embedded quotes
 // and control characters are safely escaped instead of corrupting the body.
-func writeJSONError(w http.ResponseWriter, status int, msg string) {
+// The supplied logger is used for write-failure reporting so errors surface on
+// the request-scoped daemon logger instead of the process default. A nil
+// logger falls back to slog.Default so every misuse path has a sink.
+func writeJSONError(logger *slog.Logger, w http.ResponseWriter, status int, msg string) {
 	body, err := json.Marshal(errorResponse{Error: msg})
 	if err != nil {
 		// errorResponse has a single string field; marshaling cannot fail in
@@ -188,6 +197,9 @@ func writeJSONError(w http.ResponseWriter, status int, msg string) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
 	if _, err := w.Write(body); err != nil {
-		slog.Default().Error("api error write failed", "error", err)
+		if logger == nil {
+			logger = slog.Default()
+		}
+		logger.Error("api error write failed", "error", err)
 	}
 }

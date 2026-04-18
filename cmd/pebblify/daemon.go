@@ -88,7 +88,7 @@ func runDaemonLoop(loaded *config.Loaded, logger *slog.Logger) error {
 		return fmt.Errorf("build notifier: %w", err)
 	}
 
-	targets, err := store.New(cfg.Save, loaded.Secrets)
+	targets, err := store.New(rootCtx, cfg.Save, loaded.Secrets, logger)
 	if err != nil {
 		return fmt.Errorf("build store targets: %w", err)
 	}
@@ -122,6 +122,13 @@ func runDaemonLoop(loaded *config.Loaded, logger *slog.Logger) error {
 		return fmt.Errorf("build health server: %w", err)
 	}
 
+	services := DaemonServices{
+		Runner:          r,
+		APIServer:       apiServer,
+		HealthServer:    healthServer,
+		TelemetryServer: telemetryServer,
+	}
+
 	logger.Info("pebblify daemon started",
 		"version", Version,
 		"health_enabled", cfg.Health.Enable,
@@ -130,7 +137,7 @@ func runDaemonLoop(loaded *config.Loaded, logger *slog.Logger) error {
 		"save_targets", len(targets),
 	)
 
-	errCh := startConcurrentServers(rootCtx, logger, r, apiServer, healthServer, telemetryServer)
+	errCh := startConcurrentServers(rootCtx, logger, services)
 
 	select {
 	case <-rootCtx.Done():
@@ -147,20 +154,34 @@ func runDaemonLoop(loaded *config.Loaded, logger *slog.Logger) error {
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), daemonShutdownTimeout)
 	defer shutdownCancel()
 
-	drainDaemon(shutdownCtx, logger, q, r, apiServer, healthServer, telemetryServer)
+	drainDaemon(shutdownCtx, logger, q, services)
 	return nil
+}
+
+// DaemonServices bundles every long-lived sub-server the daemon orchestrates.
+// Passing a single struct keeps startConcurrentServers and drainDaemon under
+// the CLAUDE.md five-parameter ceiling and eliminates the positional-argument
+// mis-wiring risk that plagued the earlier signature.
+type DaemonServices struct {
+	// Runner executes job pipelines pulled from the queue.
+	Runner runner.Runner
+	// APIServer exposes the v1 HTTP API.
+	APIServer api.Server
+	// HealthServer exposes /healthz and /readyz. Nil when disabled in config.
+	HealthServer health.Server
+	// TelemetryServer exposes /metrics. Nil when telemetry is disabled.
+	TelemetryServer telemetry.Server
 }
 
 // startConcurrentServers launches every sub-server and the runner under their
 // own goroutines, returning a channel that surfaces the first error observed.
 // The channel is buffered so no goroutine blocks when multiple errors surface.
 func startConcurrentServers(ctx context.Context, logger *slog.Logger,
-	r runner.Runner, apiSrv api.Server, healthSrv health.Server,
-	telemetrySrv telemetry.Server) <-chan error {
+	services DaemonServices) <-chan error {
 	errCh := make(chan error, 4)
 
 	go func() {
-		if err := r.Start(ctx); err != nil {
+		if err := services.Runner.Start(ctx); err != nil {
 			logger.Error("runner stopped with error", "error", err)
 			errCh <- err
 			return
@@ -169,7 +190,7 @@ func startConcurrentServers(ctx context.Context, logger *slog.Logger,
 	}()
 
 	go func() {
-		if err := apiSrv.Start(ctx); err != nil {
+		if err := services.APIServer.Start(ctx); err != nil {
 			logger.Error("api server exited", "error", err)
 			errCh <- err
 			return
@@ -177,9 +198,9 @@ func startConcurrentServers(ctx context.Context, logger *slog.Logger,
 		errCh <- nil
 	}()
 
-	if healthSrv != nil {
+	if services.HealthServer != nil {
 		go func() {
-			if err := healthSrv.Start(ctx); err != nil {
+			if err := services.HealthServer.Start(ctx); err != nil {
 				logger.Error("health server exited", "error", err)
 				errCh <- err
 				return
@@ -187,9 +208,9 @@ func startConcurrentServers(ctx context.Context, logger *slog.Logger,
 			errCh <- nil
 		}()
 	}
-	if telemetrySrv != nil {
+	if services.TelemetryServer != nil {
 		go func() {
-			if err := telemetrySrv.Start(ctx); err != nil {
+			if err := services.TelemetryServer.Start(ctx); err != nil {
 				logger.Error("telemetry server exited", "error", err)
 				errCh <- err
 				return
@@ -204,9 +225,13 @@ func startConcurrentServers(ctx context.Context, logger *slog.Logger,
 // drainDaemon stops every sub-server and the runner concurrently, bounded by
 // ctx. Individual errors are logged but never aborted on; the daemon must
 // attempt a full drain to leave external systems consistent.
+//
+// http.ErrServerClosed is filtered out of the warning log because every
+// graceful Stop on an http-backed server returns it as part of the normal
+// close dance; surfacing it would spam the operator with a non-actionable
+// warning on every shutdown.
 func drainDaemon(ctx context.Context, logger *slog.Logger, q queue.Queue,
-	r runner.Runner, apiSrv api.Server, healthSrv health.Server,
-	telemetrySrv telemetry.Server) {
+	services DaemonServices) {
 	if err := q.Shutdown(ctx); err != nil {
 		logger.Warn("queue shutdown error", "error", err)
 	}
@@ -215,7 +240,7 @@ func drainDaemon(ctx context.Context, logger *slog.Logger, q queue.Queue,
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		if err := r.Stop(ctx); err != nil && !errors.Is(err, context.Canceled) {
+		if err := services.Runner.Stop(ctx); err != nil && !errors.Is(err, context.Canceled) {
 			logger.Warn("runner stop error", "error", err)
 		}
 	}()
@@ -223,25 +248,25 @@ func drainDaemon(ctx context.Context, logger *slog.Logger, q queue.Queue,
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		if err := apiSrv.Stop(ctx); err != nil {
+		if err := services.APIServer.Stop(ctx); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			logger.Warn("api server stop error", "error", err)
 		}
 	}()
 
-	if healthSrv != nil {
+	if services.HealthServer != nil {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if err := healthSrv.Stop(ctx); err != nil {
+			if err := services.HealthServer.Stop(ctx); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				logger.Warn("health server stop error", "error", err)
 			}
 		}()
 	}
-	if telemetrySrv != nil {
+	if services.TelemetryServer != nil {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if err := telemetrySrv.Stop(ctx); err != nil {
+			if err := services.TelemetryServer.Stop(ctx); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				logger.Warn("telemetry server stop error", "error", err)
 			}
 		}()
