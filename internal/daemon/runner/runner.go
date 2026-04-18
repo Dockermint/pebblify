@@ -52,6 +52,13 @@ const (
 	// verifySamplePercent is the sampling rate passed to internal/verify. 0
 	// forces a full scan, matching the spec "no sampling skip in daemon".
 	verifySamplePercent = 0
+	// workspaceCleanupGrace caps how long cleanupWorkspace waits for any
+	// background goroutine spawned by convert/verify to release its file
+	// handles after ctx cancellation. The wait prevents os.RemoveAll from
+	// racing with an open PebbleDB, which would otherwise return EBUSY on
+	// Linux and permission-denied on Windows. A bounded timeout keeps the
+	// daemon responsive even when the leaked goroutine stalls permanently.
+	workspaceCleanupGrace = 30 * time.Second
 )
 
 // Sentinel errors returned by the runner.
@@ -260,11 +267,11 @@ func (r *jobRunner) runPipeline(ctx context.Context, logger *slog.Logger,
 		return err
 	}
 
-	if err := r.convert(ctx, logger, levelDir, ws.pebbleDir, ws.migrationTmp); err != nil {
+	if err := r.convert(ctx, logger, ws, levelDir); err != nil {
 		return fmt.Errorf("convert: %w", err)
 	}
 
-	if err := r.verify(ctx, logger, levelDir, ws.pebbleDir); err != nil {
+	if err := r.verify(ctx, logger, ws, levelDir); err != nil {
 		return fmt.Errorf("verify: %w", err)
 	}
 
@@ -311,6 +318,13 @@ func (r *jobRunner) failJob(ctx context.Context, logger *slog.Logger,
 }
 
 // workspace groups the scratch directories created for a single job.
+//
+// bgTasks tracks background goroutines spawned by convert and verify. The
+// internal/migration and internal/verify APIs do not yet accept a context, so
+// cancellation from Stop abandons the work goroutine while it still holds
+// file handles on the PebbleDB output. cleanupWorkspace must wait on bgTasks
+// with a bounded timeout before removing the scratch tree to avoid racing
+// the leaked goroutine on Windows and EBUSY paths on Linux.
 type workspace struct {
 	root         string
 	srcDir       string
@@ -318,6 +332,7 @@ type workspace struct {
 	pebbleDir    string
 	outDir       string
 	migrationTmp string
+	bgTasks      sync.WaitGroup
 }
 
 // prepareWorkspace creates <tmp>/<job_id>/{src,extracted,pebbledb,out,migration}.
@@ -341,12 +356,41 @@ func (r *jobRunner) prepareWorkspace(jobID string) (*workspace, error) {
 
 // cleanupWorkspace removes the job scratch tree. Errors are logged, not
 // returned, because cleanup must run on every exit path.
+//
+// Any background goroutine still holding file handles (convert or verify that
+// was abandoned on ctx cancellation) is awaited up to workspaceCleanupGrace
+// before removal. If the grace period elapses, cleanup proceeds anyway and the
+// lingering handles turn into a bounded partial-cleanup warning rather than an
+// indefinite leak. The timer goroutine cleanly exits on either path.
 func (r *jobRunner) cleanupWorkspace(logger *slog.Logger, ws *workspace) {
 	if ws == nil {
 		return
 	}
+	if err := waitWithTimeout(&ws.bgTasks, workspaceCleanupGrace); err != nil {
+		logger.Warn("cleanup workspace waited for background goroutines",
+			"path", ws.root, "grace", workspaceCleanupGrace, "error", err)
+	}
 	if err := os.RemoveAll(ws.root); err != nil {
 		logger.Warn("cleanup workspace failed", "path", ws.root, "error", err)
+	}
+}
+
+// waitWithTimeout blocks until wg.Wait returns or d elapses. Returns a
+// non-nil error only when the timeout fires; callers should treat a timeout
+// as a best-effort cleanup advisory rather than a fatal condition.
+func waitWithTimeout(wg *sync.WaitGroup, d time.Duration) error {
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-done:
+		return nil
+	case <-timer.C:
+		return fmt.Errorf("background goroutines did not finish within %s", d)
 	}
 }
 
@@ -461,15 +505,16 @@ func copyWithProgress(ctx context.Context, dst io.Writer, src io.Reader,
 // internal/migration.RunLevelToPebble pre-dates context plumbing, so the call
 // runs in a child goroutine and we select on ctx.Done() to honour cancellation
 // from Stop or a daemon-wide shutdown. When ctx fires first, the goroutine is
-// left to complete on its own (logged as a known leak) and the caller gets
-// ctx.Err(); v0.5.x is expected to plumb context through the migration API so
-// this wrapper can collapse back to a direct call.
+// left to complete on its own (registered on ws.bgTasks so cleanupWorkspace
+// can await handle release before os.RemoveAll) and the caller gets ctx.Err();
+// v0.5.x is expected to plumb context through the migration API so this
+// wrapper can collapse back to a direct call.
 func (r *jobRunner) convert(ctx context.Context, logger *slog.Logger,
-	levelDir, pebbleDir, tmpRoot string) error {
+	ws *workspace, levelDir string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	logger.Info("conversion starting", "src", levelDir, "out", pebbleDir)
+	logger.Info("conversion starting", "src", levelDir, "out", ws.pebbleDir)
 	cfg := &migration.RunConfig{
 		Workers:        migrationWorkers,
 		BatchMemory:    migrationBatchMemoryMB,
@@ -478,8 +523,10 @@ func (r *jobRunner) convert(ctx context.Context, logger *slog.Logger,
 	}
 
 	done := make(chan error, 1)
+	ws.bgTasks.Add(1)
 	go func() {
-		done <- migration.RunLevelToPebble(levelDir, pebbleDir, cfg, tmpRoot)
+		defer ws.bgTasks.Done()
+		done <- migration.RunLevelToPebble(levelDir, ws.pebbleDir, cfg, ws.migrationTmp)
 	}()
 
 	select {
@@ -500,15 +547,17 @@ func (r *jobRunner) convert(ctx context.Context, logger *slog.Logger,
 //
 // Mirrors convert: verify.Run does not yet accept a context, so the blocking
 // call is wrapped in a goroutine and multiplexed against ctx.Done(). On
-// cancellation the wrapper returns ctx.Err() and leaves the background call to
-// complete; the leak is bounded because verify has its own internal timeouts
-// and always terminates. See convert's doc comment for the v0.5.x roadmap.
+// cancellation the wrapper returns ctx.Err() and leaves the background call
+// to complete; the goroutine is registered on ws.bgTasks so cleanupWorkspace
+// can wait (bounded by workspaceCleanupGrace) for file handles to release
+// before removing the scratch tree. See convert's doc comment for the v0.5.x
+// roadmap.
 func (r *jobRunner) verify(ctx context.Context, logger *slog.Logger,
-	levelDir, pebbleDir string) error {
+	ws *workspace, levelDir string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	dataDir := filepath.Join(pebbleDir, "data")
+	dataDir := filepath.Join(ws.pebbleDir, "data")
 	logger.Info("verification starting", "src", levelDir, "out", dataDir)
 	cfg := &verify.Config{
 		SamplePercent: verifySamplePercent,
@@ -517,7 +566,9 @@ func (r *jobRunner) verify(ctx context.Context, logger *slog.Logger,
 	}
 
 	done := make(chan error, 1)
+	ws.bgTasks.Add(1)
 	go func() {
+		defer ws.bgTasks.Done()
 		done <- verify.Run(levelDir, dataDir, cfg)
 	}()
 
@@ -537,23 +588,23 @@ func (r *jobRunner) verify(ctx context.Context, logger *slog.Logger,
 
 // replaceDBTree swaps the original LevelDB subtree in the extracted archive
 // for the newly-produced PebbleDB subtree. When delete_source_snapshot is
-// false, the LevelDB tree is retained alongside the PebbleDB output.
+// false, the LevelDB tree is retained alongside the PebbleDB output under a
+// sibling directory suffixed "_pebbledb".
 func (r *jobRunner) replaceDBTree(levelDir, pebbleDir string) error {
 	dataDir := filepath.Join(pebbleDir, "data")
-	parent := filepath.Dir(levelDir)
-	target := filepath.Join(parent, filepath.Base(levelDir))
+	cleanedLevelDir := filepath.Clean(levelDir)
 
 	if r.deps.Cfg.Conversion.DeleteSourceSnapshot {
-		if err := os.RemoveAll(target); err != nil {
-			return fmt.Errorf("remove source leveldb tree %s: %w", target, err)
+		if err := os.RemoveAll(cleanedLevelDir); err != nil {
+			return fmt.Errorf("remove source leveldb tree %s: %w", cleanedLevelDir, err)
 		}
-		if err := os.Rename(dataDir, target); err != nil {
+		if err := os.Rename(dataDir, cleanedLevelDir); err != nil {
 			return fmt.Errorf("move pebble tree into place: %w", err)
 		}
 		return nil
 	}
-	pebbleTarget := filepath.Join(parent, filepath.Base(levelDir)+"_pebbledb")
-	if err := os.Rename(dataDir, pebbleTarget); err != nil {
+	pebbleSiblingDir := cleanedLevelDir + "_pebbledb"
+	if err := os.Rename(dataDir, pebbleSiblingDir); err != nil {
 		return fmt.Errorf("move pebble tree alongside leveldb: %w", err)
 	}
 	return nil

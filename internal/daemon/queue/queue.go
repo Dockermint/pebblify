@@ -200,27 +200,42 @@ func (q *FIFOQueue) Dequeue(ctx context.Context) (Job, error) {
 			return Job{}, ErrShuttingDown
 		}
 		jobCopy := job
-		q.releaseHandoff(&jobCopy)
+		if !q.releaseHandoff(&jobCopy) {
+			// Shutdown closed the queue between channel receive and handoff;
+			// drop the job so pending buffered items never promote to current
+			// after the Shutdown contract is already in effect.
+			q.logger.Warn("queue job dropped on shutdown handoff",
+				"job_id", job.ID, "url", RedactURL(job.URL))
+			return Job{}, ErrShuttingDown
+		}
 		return job, nil
 	}
 }
 
 // releaseHandoff decrements the handoff counter and either marks current (when
-// current is non-nil and a job was delivered) or leaves the slot idle. The
-// condition variable is broadcast in both cases so waitForCurrent revisits its
-// predicate. The canonical URL is removed from pending only when a job is
-// handed off; the drop-on-shutdown path owns its own pending deletion.
-func (q *FIFOQueue) releaseHandoff(job *Job) {
+// current is non-nil and the queue is still open) or leaves the slot idle. The
+// condition variable is broadcast in all cases so waitForCurrent revisits its
+// predicate. The canonical URL is removed from pending when a job was handed
+// off, regardless of whether it was promoted to current, so the dedup map does
+// not retain stale entries. The return value reports whether the job was
+// actually promoted to current: false means the queue was closed while the
+// receiver was in flight and the caller must treat the job as dropped.
+func (q *FIFOQueue) releaseHandoff(job *Job) bool {
 	q.mu.Lock()
 	q.handoff--
+	delivered := false
 	if job != nil {
 		if canonical, err := Canonicalize(job.URL); err == nil {
 			delete(q.pending, canonical)
 		}
-		q.current = job
+		if !q.closed {
+			q.current = job
+			delivered = true
+		}
 	}
 	q.cond.Broadcast()
 	q.mu.Unlock()
+	return delivered
 }
 
 // CompleteCurrent clears the current job slot and signals any goroutine

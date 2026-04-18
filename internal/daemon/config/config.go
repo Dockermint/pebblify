@@ -23,12 +23,17 @@ const SupportedConfigVersion = 0
 const DefaultQueueBufferSize = 64
 
 // Compression codec identifiers accepted by the save.compression field.
+//
+// Every codec listed here MUST be implemented end-to-end by
+// internal/daemon/repack and internal/daemon/store. Adding a constant without
+// the downstream wiring would let a TOML file pass Load() and then fail at
+// repack time with an opaque error. "zip" is deliberately absent because
+// repack.Compress only emits tar-based archives.
 const (
 	CompressionNone = "none"
 	CompressionLZ4  = "lz4"
 	CompressionZstd = "zstd"
 	CompressionGzip = "gzip"
-	CompressionZip  = "zip"
 )
 
 // Authentication mode identifiers accepted by the api.authentification_mode field.
@@ -348,9 +353,13 @@ func expandHome(p string) (string, error) {
 }
 
 // validate enforces cross-field invariants defined in the daemon spec.
+//
+// SupportedConfigVersion is the maximum version this loader understands, so
+// only versions strictly greater than it are rejected. Older schema versions
+// are accepted; the loader is backwards compatible by contract.
 func validate(cfg *Config, secrets Secrets) error {
-	if cfg.General.ConfigVersion != SupportedConfigVersion {
-		return fmt.Errorf("%w: got %d, want %d", ErrUnsupportedConfigVersion,
+	if cfg.General.ConfigVersion > SupportedConfigVersion {
+		return fmt.Errorf("%w: got %d, max supported %d", ErrUnsupportedConfigVersion,
 			cfg.General.ConfigVersion, SupportedConfigVersion)
 	}
 
@@ -464,7 +473,7 @@ func validateNotify(cfg *Config, secrets Secrets) error {
 // validateSave enforces the save subsystem invariants across local, scp, and s3.
 func validateSave(cfg *Config, secrets Secrets) error {
 	switch cfg.Save.Compression {
-	case CompressionNone, CompressionLZ4, CompressionZstd, CompressionGzip, CompressionZip:
+	case CompressionNone, CompressionLZ4, CompressionZstd, CompressionGzip:
 	default:
 		return fmt.Errorf("%w: %q", ErrInvalidCompression, cfg.Save.Compression)
 	}

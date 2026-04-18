@@ -565,6 +565,43 @@ func TestFIFOQueue_DequeueShutdownRace(t *testing.T) {
 	}
 }
 
+// TestFIFOQueue_Dequeue_AfterShutdownDiscardsBufferedJob verifies that a
+// Dequeue call that races with Shutdown does not deliver a buffered job that
+// was pulled from the channel after q.closed was set. The contract is:
+// pending buffered jobs are dropped by Shutdown; a Dequeue that loses the race
+// must return ErrShuttingDown rather than promoting a post-shutdown channel
+// receive to q.current.
+//
+// This test arranges the race explicitly: it enqueues a job so the channel
+// has a buffered item, calls Shutdown, then calls Dequeue on the already-closed
+// queue. Both operations happen sequentially here because Shutdown drains the
+// channel; the subsequent Dequeue must observe the closed channel and return
+// ErrShuttingDown.
+func TestFIFOQueue_Dequeue_AfterShutdownDiscardsBufferedJob(t *testing.T) {
+	t.Parallel()
+	q := newTestQueue(4)
+	if err := q.Enqueue(Job{ID: "j1", URL: "https://example.com/snap"}); err != nil {
+		t.Fatalf("Enqueue() error: %v", err)
+	}
+
+	shutCtx, shutCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer shutCancel()
+	if err := q.Shutdown(shutCtx); err != nil {
+		t.Fatalf("Shutdown() error: %v", err)
+	}
+
+	// After Shutdown drains the buffered job, the channel is closed.
+	// Dequeue must not deliver the already-drained job; it must return ErrShuttingDown.
+	_, err := q.Dequeue(context.Background())
+	if !errors.Is(err, ErrShuttingDown) {
+		t.Errorf("Dequeue after Shutdown with buffered job error = %v, want %v", err, ErrShuttingDown)
+	}
+	// q.current must remain nil: no job should have been promoted after shutdown.
+	if cur := q.Current(); cur != nil {
+		t.Errorf("Current() after shutdown Dequeue = %+v, want nil (buffered job must not be promoted)", cur)
+	}
+}
+
 // TestCleanURLPath covers the path-cleaning helper.
 func TestCleanURLPath(t *testing.T) {
 	t.Parallel()
