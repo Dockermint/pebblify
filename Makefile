@@ -80,9 +80,58 @@ build-docker-linux-arm64:
 # INSTALL
 # ==============================================================================
 
+# install-cli: cross-platform (linux/amd64, linux/arm64, darwin/amd64, darwin/arm64).
+# Installs to $(GOPATH)/bin if set and writable, else /usr/local/bin. No root required.
+.PHONY: install-cli
+install-cli:
+	CGO_ENABLED=0 go build $(GOFLAGS) -o $(BINARY) ./cmd/pebblify
+	@if [ -n "$(GOPATH)" ] && [ -w "$(GOPATH)/bin" ]; then \
+		mv $(BINARY) $(GOPATH)/bin/$(BINARY); \
+		echo "Installed to $(GOPATH)/bin/$(BINARY)"; \
+	else \
+		mv $(BINARY) /usr/local/bin/$(BINARY); \
+		echo "Installed to /usr/local/bin/$(BINARY)"; \
+	fi
+
+# install-systemd-daemon: Linux-only. Requires root (run via sudo).
+# Copies binary, config template, env stub, and systemd unit file.
+# Does NOT run systemctl enable/start — operator does this manually.
+.PHONY: install-systemd-daemon
+install-systemd-daemon:
+	@if [ "$$(uname -s)" != "Linux" ]; then \
+		echo "Error: install-systemd-daemon is Linux-only. Use Docker or Podman on macOS."; \
+		exit 1; \
+	fi
+	CGO_ENABLED=0 go build $(GOFLAGS) -o /usr/local/bin/$(BINARY) ./cmd/pebblify
+	install -d -m 0750 /etc/pebblify
+	@if [ ! -f /etc/pebblify/config.toml ]; then \
+		printf '[general]\nconfig_version = 0\n\n[api]\nenable = false\nhost = "127.0.0.1"\nport = 2324\nauthentification_mode = "basic_auth"\n\n[notify]\nenable = false\nmode = "telegram"\nchannel_id = ""\n\n[telemetry]\nenable = true\nmode = "prometheus"\nhost = "127.0.0.1"\nport = 2323\n\n[health]\nenable = true\nhost = "127.0.0.1"\nport = 2325\n\n[convertion]\ntemporary_directory = "/tmp"\ndelete_source_snapshot = true\n\n[save]\ncompression = "lz4"\n\n[save.local]\nenable = true\nlocal_save_directory = "~/.snapshots"\n\n[save.scp]\nenable = false\nauthentification_mode = "key"\nhost = ""\nport = 0\nusername = ""\n\n[save.s3]\nenable = false\nbucket_name = ""\ns3_access_key = ""\nsave_path = ""\n' > /etc/pebblify/config.toml; \
+		echo "Created /etc/pebblify/config.toml"; \
+	else \
+		echo "Skipped /etc/pebblify/config.toml (already exists)"; \
+	fi
+	@if [ ! -f /etc/pebblify/.env ]; then \
+		install -m 0600 systemd/pebblify.env.example /etc/pebblify/.env; \
+		echo "Created /etc/pebblify/.env"; \
+	else \
+		echo "Skipped /etc/pebblify/.env (already exists)"; \
+	fi
+	@if [ ! -f /etc/systemd/system/pebblify.service ]; then \
+		install -m 0644 systemd/pebblify.service /etc/systemd/system/pebblify.service; \
+		echo "Created /etc/systemd/system/pebblify.service"; \
+	else \
+		echo "Skipped /etc/systemd/system/pebblify.service (already exists)"; \
+	fi
+	@echo ""
+	@echo "Installation complete. Next steps:"
+	@echo "  1. Edit /etc/pebblify/.env — fill in all PEBBLIFY_* secrets"
+	@echo "  2. Review /etc/pebblify/config.toml and adjust as needed"
+	@echo "  3. Create system user: useradd --system --no-create-home pebblify"
+	@echo "  4. Enable + start: systemctl enable --now pebblify"
+
+# install: retained as alias for install-cli (backward compat).
 .PHONY: install
-install: build
-	mv $(BINARY) $(GOPATH)/bin/$(BINARY) 2>/dev/null || mv $(BINARY) /usr/local/bin/$(BINARY)
+install: install-cli
 
 # ==============================================================================
 # UTILITIES
@@ -90,7 +139,7 @@ install: build
 
 .PHONY: clean
 clean:
-	rm -f $(BINARY) $(BINARY)-linux-amd64 $(BINARY)-linux-arm64
+	rm -f $(BINARY) $(BINARY)-linux-amd64 $(BINARY)-linux-arm64 $(BINARY)-darwin-amd64 $(BINARY)-darwin-arm64
 
 .PHONY: info
 info:
