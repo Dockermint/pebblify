@@ -137,6 +137,48 @@ install-systemd-daemon:
 	@echo "  3. Run: systemctl daemon-reload"
 	@echo "  4. Enable + start: systemctl enable --now pebblify"
 
+# install-podman: rootless, per-user Podman Quadlet install for systemd user session.
+# Does NOT enable or start the unit — operator does this manually.
+# Requires podman on PATH. Warns but continues if systemd user session is unavailable.
+.PHONY: install-podman
+install-podman:
+	@if ! command -v podman >/dev/null 2>&1; then \
+		echo "Error: podman not found on PATH. Install Podman before running this target."; \
+		exit 1; \
+	fi
+	@if ! systemctl --user status >/dev/null 2>&1; then \
+		echo "Warning: systemd user session is not available. Quadlet units will not activate until a user session with systemd is present."; \
+	fi
+	install -d -m 0755 $(HOME)/.config/containers/systemd
+	@if [ ! -f $(HOME)/.config/containers/systemd/pebblify.container ]; then \
+		install -m 0644 quadlet/pebblify.container \
+			$(HOME)/.config/containers/systemd/pebblify.container; \
+		echo "Created $(HOME)/.config/containers/systemd/pebblify.container"; \
+	else \
+		echo "Skipped $(HOME)/.config/containers/systemd/pebblify.container (already exists)"; \
+	fi
+	install -d -m 0700 $(HOME)/.pebblify
+	@if [ ! -f $(HOME)/.pebblify/config.toml ]; then \
+		install -m 0600 config.toml $(HOME)/.pebblify/config.toml; \
+		echo "Created $(HOME)/.pebblify/config.toml"; \
+	else \
+		echo "Skipped $(HOME)/.pebblify/config.toml (already exists)"; \
+	fi
+	@if [ ! -f $(HOME)/.pebblify/.env ]; then \
+		install -m 0600 systemd/pebblify.env.example $(HOME)/.pebblify/.env; \
+		echo "Created $(HOME)/.pebblify/.env"; \
+	else \
+		echo "Skipped $(HOME)/.pebblify/.env (already exists)"; \
+	fi
+	@echo ""
+	@echo "Pebblify Quadlet installed."
+	@echo "Next steps:"
+	@echo "  1. Edit ~/.pebblify/config.toml"
+	@echo "  2. Fill in secrets: ~/.pebblify/.env"
+	@echo "  3. Reload user units: systemctl --user daemon-reload"
+	@echo "  4. Start: systemctl --user start pebblify"
+	@echo "  5. Enable on login: systemctl --user enable pebblify"
+
 # install: retained as alias for install-cli (backward compat).
 .PHONY: install
 install: install-cli
