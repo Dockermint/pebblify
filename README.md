@@ -35,13 +35,48 @@ PebbleDB offers significant performance improvements over LevelDB, including bet
 
 ## Installation
 
-### From Source
+### CLI (all platforms)
+
+Cross-platform. Works on `linux/amd64`, `linux/arm64`, `darwin/amd64`, and `darwin/arm64`.
 
 ```bash
 git clone https://github.com/Dockermint/pebblify.git
 cd pebblify
-make build     # build for current platform
-make install   # build and install to PATH
+make install-cli   # build and install pebblify binary to PATH
+```
+
+Or download a pre-built binary from [releases](https://github.com/Dockermint/pebblify/releases).
+
+### Systemd daemon — **Linux only**
+
+Installs the daemon as a system service. Requires root. Not supported on macOS.
+
+```bash
+sudo make install-systemd-daemon
+```
+
+After installation, fill in `/etc/pebblify/.env`, then:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now pebblify
+```
+
+See [daemon quickstart](docs/markdown/daemon-quickstart.md) for the full setup guide.
+
+### Podman Quadlet (rootless)
+
+Deploys the daemon as a rootless Podman container managed by the systemd user session. Linux-native; macOS users need Podman Desktop.
+
+```bash
+make install-podman
+```
+
+After installation:
+
+```bash
+systemctl --user daemon-reload
+systemctl --user start pebblify
 ```
 
 ### Docker
@@ -49,6 +84,30 @@ make install   # build and install to PATH
 ```bash
 make build-docker
 ```
+
+## Daemon mode
+
+`pebblify daemon` is a long-running HTTP service that accepts snapshot archive URLs, converts them from LevelDB to PebbleDB format, repacks the output, and saves it to one or more storage targets (local directory, SCP, S3). Jobs are submitted via a REST API and processed serially.
+
+**Platform:** The `daemon` subcommand is Linux-only at runtime. On macOS, use Docker Compose or Podman.
+
+```bash
+# Set the API token
+export PEBBLIFY_BASIC_AUTH_TOKEN="your-secret-token-here"
+
+# Start the daemon (Linux only)
+pebblify daemon
+
+# Submit a job
+curl -s -X POST http://127.0.0.1:2324/v1/jobs \
+  -u "ignored:${PEBBLIFY_BASIC_AUTH_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://snapshots.example.com/gaia-snapshot.tar.lz4"}'
+```
+
+> **macOS users:** Run the daemon via Docker Compose (`docker compose -f docker-compose.daemon.yml up -d`) or Podman Desktop. See [daemon quickstart](docs/markdown/daemon-quickstart.md).
+
+Full guide: [docs/markdown/daemon-quickstart.md](docs/markdown/daemon-quickstart.md)
 
 ## Quick Start
 
@@ -84,6 +143,25 @@ docker run --rm \
 ```
 
 > For full command reference and all available flags, see the [documentation](https://docs.dockermint.io/pebblify/).
+
+## Artifact attestation
+
+Starting with v0.4.0, every release binary and Docker image is published with SLSA provenance and SBOM attestations. Verify before running:
+
+```bash
+# Verify a release binary
+gh attestation verify pebblify-linux-amd64 \
+  --repo Dockermint/Pebblify
+
+# Verify the Docker image
+gh attestation verify \
+  oci://ghcr.io/dockermint/pebblify:v0.4.0 \
+  --repo Dockermint/Pebblify
+```
+
+Available attestation targets: `pebblify-linux-amd64`, `pebblify-linux-arm64`, `pebblify-darwin-amd64`, `pebblify-darwin-arm64`, and the multi-arch Docker image.
+
+Full guide: [docs/markdown/release-automation.md](docs/markdown/release-automation.md)
 
 ## Benchmark
 

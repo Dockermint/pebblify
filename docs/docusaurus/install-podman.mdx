@@ -1,0 +1,153 @@
+---
+id: install-podman
+title: Install via Podman Quadlet
+sidebar_label: Install (Podman)
+sidebar_position: 3
+description: Deploy the Pebblify daemon as a rootless Podman Quadlet managed by systemd user session.
+---
+
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
+Deploy the Pebblify daemon as a rootless Podman Quadlet. No root required. The container is managed by the systemd user session.
+
+<Tabs>
+<TabItem value="linux" label="Linux (native)">
+
+Podman Quadlet runs natively on Linux with a systemd user session. This is the recommended path for Linux users who prefer rootless containers over a system-wide `pebblify` binary.
+
+</TabItem>
+<TabItem value="macos" label="macOS (via Podman Desktop)">
+
+On macOS, Podman runs containers inside a Linux VM provided by Podman Desktop. The Quadlet and `systemctl --user` commands run inside that VM. Install [Podman Desktop](https://podman-desktop.io/) first, then follow the Linux instructions — they apply within the VM context.
+
+The `make install-podman` target emits a warning if `systemctl --user status` is unavailable (which it will be on a bare macOS host without the VM layer active).
+
+:::note
+For a simpler macOS path, use Docker Compose with `docker compose -f docker-compose.daemon.yml up -d`. See [daemon quickstart](daemon-quickstart).
+:::
+
+</TabItem>
+</Tabs>
+
+## Prerequisites
+
+- Podman installed and on `PATH`
+- systemd user session available (`systemctl --user status`)
+- Pebblify source cloned locally
+
+## Step 1: Run the installer
+
+```bash
+make install-podman
+```
+
+The target:
+
+1. Checks that `podman` is on `PATH` (exits with an error if not found).
+2. Checks that a systemd user session is available (warns but continues if not).
+3. Creates `~/.config/containers/systemd/` if it does not exist.
+4. Copies the Quadlet file to `~/.config/containers/systemd/pebblify.container`. **Does not overwrite** if the file already exists.
+5. Creates `~/.pebblify/` (mode `0700`) if it does not exist.
+6. Creates `~/.pebblify/config.toml` from a template. **Does not overwrite** if the file already exists.
+7. Creates `~/.pebblify/.env` with all `PEBBLIFY_*` stubs as empty strings (mode `0600`). **Does not overwrite** if the file already exists.
+
+Post-install output:
+
+```
+Pebblify Quadlet installed.
+Next steps:
+  1. Edit ~/.pebblify/config.toml
+  2. Fill in secrets: ~/.pebblify/.env
+  3. Reload user units: systemctl --user daemon-reload
+  4. Start: systemctl --user start pebblify
+  5. Enable on login: systemctl --user enable pebblify
+```
+
+## Step 2: Configure the daemon
+
+Edit `~/.pebblify/config.toml`. The template pre-sets `save.local.local_save_directory` to `/snapshots` to match the container volume mount:
+
+```toml
+[save.local]
+enable = true
+local_save_directory = "/snapshots"
+```
+
+See [configuration-reference](configuration-reference) for all available keys.
+
+## Step 3: Set secrets
+
+Edit `~/.pebblify/.env`:
+
+```ini
+PEBBLIFY_BASIC_AUTH_TOKEN=your-secret-token-here
+# Uncomment if using Telegram notifications:
+# PEBBLIFY_TELEGRAM_BOT_TOKEN=123456789:ABCdefGhIJKlmNoPQRstUVwxyZ
+# Uncomment if using S3:
+# PEBBLIFY_S3_SECRET_KEY=your-s3-secret-key
+# AWS_REGION=us-east-1
+```
+
+## Step 4: Reload and start
+
+```bash
+# Reload systemd user session to pick up the new Quadlet
+systemctl --user daemon-reload
+
+# Start the container
+systemctl --user start pebblify
+
+# Enable on login
+systemctl --user enable pebblify
+```
+
+## Step 5: Verify
+
+```bash
+# Service status
+systemctl --user status pebblify
+
+# Container logs
+podman logs pebblify
+
+# API health check
+curl -s http://127.0.0.1:2324/v1/status \
+  -u "ignored:${PEBBLIFY_BASIC_AUTH_TOKEN}"
+```
+
+## Quadlet file overview
+
+The Quadlet file installed at `~/.config/containers/systemd/pebblify.container` specifies:
+
+```ini
+[Container]
+Image=ghcr.io/dockermint/pebblify:v0.4.0
+Exec=daemon
+PublishPort=2324:2324
+PublishPort=2325:2325
+PublishPort=2323:2323
+Volume=%h/.pebblify/config.toml:/etc/pebblify/config.toml:ro,z
+Volume=pebblify-snapshots:/snapshots:z
+EnvironmentFile=%h/.pebblify/.env
+```
+
+- Port 2324: API
+- Port 2325: Health probes
+- Port 2323: Prometheus metrics
+- `%h` expands to `$HOME` in systemd specifier syntax
+- `:z` applies SELinux relabeling (safe on non-SELinux systems)
+- `pebblify-snapshots` is a named Podman volume; create it manually if needed: `podman volume create pebblify-snapshots`
+
+## Stopping and updating
+
+```bash
+# Stop
+systemctl --user stop pebblify
+
+# Update image and restart
+podman pull ghcr.io/dockermint/pebblify:v0.5.0
+# Edit the Quadlet file to update the Image= tag
+systemctl --user daemon-reload
+systemctl --user start pebblify
+```
