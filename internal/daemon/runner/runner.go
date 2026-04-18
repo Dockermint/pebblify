@@ -457,6 +457,13 @@ func copyWithProgress(ctx context.Context, dst io.Writer, src io.Reader,
 // convert invokes internal/migration to produce a PebbleDB tree at pebbleDir.
 // The migration package expects the source to be a directory containing one
 // or more *.db subdirectories.
+//
+// internal/migration.RunLevelToPebble pre-dates context plumbing, so the call
+// runs in a child goroutine and we select on ctx.Done() to honour cancellation
+// from Stop or a daemon-wide shutdown. When ctx fires first, the goroutine is
+// left to complete on its own (logged as a known leak) and the caller gets
+// ctx.Err(); v0.5.x is expected to plumb context through the migration API so
+// this wrapper can collapse back to a direct call.
 func (r *jobRunner) convert(ctx context.Context, logger *slog.Logger,
 	levelDir, pebbleDir, tmpRoot string) error {
 	if err := ctx.Err(); err != nil {
@@ -469,14 +476,33 @@ func (r *jobRunner) convert(ctx context.Context, logger *slog.Logger,
 		Verbose:        false,
 		MetricsEnabled: false,
 	}
-	if err := migration.RunLevelToPebble(levelDir, pebbleDir, cfg, tmpRoot); err != nil {
-		return err
+
+	done := make(chan error, 1)
+	go func() {
+		done <- migration.RunLevelToPebble(levelDir, pebbleDir, cfg, tmpRoot)
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			return err
+		}
+		logger.Info("conversion complete")
+		return nil
+	case <-ctx.Done():
+		logger.Warn("conversion cancelled; background goroutine will drain",
+			"error", ctx.Err())
+		return ctx.Err()
 	}
-	logger.Info("conversion complete")
-	return nil
 }
 
 // verify runs internal/verify.Run against the source/destination pair.
+//
+// Mirrors convert: verify.Run does not yet accept a context, so the blocking
+// call is wrapped in a goroutine and multiplexed against ctx.Done(). On
+// cancellation the wrapper returns ctx.Err() and leaves the background call to
+// complete; the leak is bounded because verify has its own internal timeouts
+// and always terminates. See convert's doc comment for the v0.5.x roadmap.
 func (r *jobRunner) verify(ctx context.Context, logger *slog.Logger,
 	levelDir, pebbleDir string) error {
 	if err := ctx.Err(); err != nil {
@@ -489,11 +515,24 @@ func (r *jobRunner) verify(ctx context.Context, logger *slog.Logger,
 		StopOnError:   true,
 		Verbose:       false,
 	}
-	if err := verify.Run(levelDir, dataDir, cfg); err != nil {
-		return err
+
+	done := make(chan error, 1)
+	go func() {
+		done <- verify.Run(levelDir, dataDir, cfg)
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			return err
+		}
+		logger.Info("verification complete")
+		return nil
+	case <-ctx.Done():
+		logger.Warn("verification cancelled; background goroutine will drain",
+			"error", ctx.Err())
+		return ctx.Err()
 	}
-	logger.Info("verification complete")
-	return nil
 }
 
 // replaceDBTree swaps the original LevelDB subtree in the extracted archive
@@ -521,8 +560,11 @@ func (r *jobRunner) replaceDBTree(levelDir, pebbleDir string) error {
 }
 
 // fanOutUploads pushes archiveOut to every configured target in parallel.
-// An individual upload failure is WARN-level; an all-targets failure is a
-// job-level error.
+// Every configured target must succeed; any non-zero failure count aborts the
+// job so partial successes (e.g. local succeeded, S3 failed) never masquerade
+// as a completed backup. Individual failures are still WARN-logged per target
+// for operator visibility, and the aggregate is surfaced via errors.Join so
+// callers observing the return can unwrap each underlying cause.
 func (r *jobRunner) fanOutUploads(ctx context.Context, logger *slog.Logger,
 	archiveOut string) error {
 	if len(r.deps.Targets) == 0 {
@@ -554,18 +596,23 @@ func (r *jobRunner) fanOutUploads(ctx context.Context, logger *slog.Logger,
 	}
 	wg.Wait()
 
+	total := len(r.deps.Targets)
 	var failed int
-	var joined []error
+	joined := make([]error, 0, total)
 	for _, err := range errs {
 		if err != nil {
 			failed++
 			joined = append(joined, err)
 		}
 	}
-	if failed == len(r.deps.Targets) {
+	if failed == 0 {
+		return nil
+	}
+	if failed == total {
 		return fmt.Errorf("upload: all %d targets failed: %w", failed, errors.Join(joined...))
 	}
-	return nil
+	return fmt.Errorf("upload: %d of %d targets failed: %w",
+		failed, total, errors.Join(joined...))
 }
 
 // outputArchivePath builds the on-disk path for the repacked archive using

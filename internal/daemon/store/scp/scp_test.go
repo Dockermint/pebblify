@@ -404,13 +404,22 @@ func TestSCPTarget_Name(t *testing.T) {
 
 // ---- loadHostKeyCallback ----
 
-// TestLoadHostKeyCallback_MissingKnownHostsFile returns ErrKnownHosts when the
-// ~/.ssh/known_hosts file does not exist. We test this by pointing HOME at a
-// temporary directory that has no .ssh directory.
+// TestLoadHostKeyCallback_MissingKnownHostsFile returns ErrKnownHosts when no
+// known_hosts file can be found at any candidate path. The test controls all
+// three candidates via environment variables:
+//
+//   - PEBBLIFY_SCP_KNOWN_HOSTS is set to a non-existent path so the env-var
+//     branch is exercised but fails.
+//   - HOME is set to a temporary directory without .ssh so the per-user path
+//     also fails.
+//
+// /etc/pebblify/known_hosts is a Pebblify-specific path that does not exist
+// in CI or developer environments, so the system-path branch also fails.
 func TestLoadHostKeyCallback_MissingKnownHostsFile(t *testing.T) {
-	// No t.Parallel() — modifies HOME env var.
+	// No t.Parallel() — modifies HOME and PEBBLIFY_SCP_KNOWN_HOSTS env vars.
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv(envKnownHosts, filepath.Join(home, "nonexistent_known_hosts"))
 
 	_, err := loadHostKeyCallback()
 	if !errors.Is(err, ErrKnownHosts) {

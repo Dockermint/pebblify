@@ -20,7 +20,6 @@ import (
 	"time"
 )
 
-
 // Sentinel errors returned by Queue operations.
 var (
 	// ErrDuplicate indicates the job's canonicalized URL is already running or queued.
@@ -34,24 +33,23 @@ var (
 )
 
 // defaultSchemePorts maps URL schemes to their default TCP port. Canonicalization
-// strips the port when it matches the default for the scheme.
+// strips the port when it matches the default for the scheme. The set mirrors
+// allowedSchemes so every scheme that survives validation has a documented
+// default port.
 var defaultSchemePorts = map[string]string{
 	"http":  "80",
 	"https": "443",
-	"ftp":   "21",
-	"ssh":   "22",
-	"sftp":  "22",
 }
 
 // allowedSchemes is the whitelist of URL schemes the daemon accepts as job
-// sources. Any other scheme (javascript, file, data, ...) is rejected at
-// canonicalization time so dangerous URLs never reach the runner.
+// sources. Only HTTP and HTTPS are admitted because runner.download uses
+// net/http; admitting ftp/sftp/ssh here would pass canonicalization only to
+// fail at download time with an opaque "unsupported protocol" error. Any
+// other scheme (javascript, file, data, ...) is rejected here so dangerous
+// URLs never reach the runner.
 var allowedSchemes = map[string]struct{}{
 	"http":  {},
 	"https": {},
-	"ftp":   {},
-	"sftp":  {},
-	"ssh":   {},
 }
 
 // Job is a single conversion request accepted from the API.
@@ -112,14 +110,14 @@ type Options struct {
 // in-flight, closing the race where the worker has pulled a job off ch but has
 // not yet acquired mu to mark it current.
 type FIFOQueue struct {
-	ch       chan Job
-	logger   *slog.Logger
-	mu       sync.Mutex
-	cond     *sync.Cond
-	pending  map[string]struct{} // canonical URL -> {} for pending jobs
-	current  *Job                // nil when idle
-	handoff  int                 // receives in flight but not yet marked current
-	closed   bool
+	ch      chan Job
+	logger  *slog.Logger
+	mu      sync.Mutex
+	cond    *sync.Cond
+	pending map[string]struct{} // canonical URL -> {} for pending jobs
+	current *Job                // nil when idle
+	handoff int                 // receives in flight but not yet marked current
+	closed  bool
 }
 
 // New returns an initialized FIFOQueue. BufferSize is clamped to a minimum of 1.
@@ -379,7 +377,7 @@ func Canonicalize(rawURL string) (string, error) {
 
 	scheme := strings.ToLower(u.Scheme)
 	if _, ok := allowedSchemes[scheme]; !ok {
-		return "", fmt.Errorf("unsupported url scheme %q: allowed schemes are http, https, ftp, sftp, ssh", scheme)
+		return "", fmt.Errorf("unsupported url scheme %q: only http and https are supported", scheme)
 	}
 	host := strings.ToLower(u.Hostname())
 	port := u.Port()

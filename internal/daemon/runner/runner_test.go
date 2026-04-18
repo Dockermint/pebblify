@@ -328,7 +328,8 @@ func TestRunner_Start_StopsOnQueueShutdown(t *testing.T) {
 	}
 }
 
-// TestRunner_Stop_AfterContextCancel waits for Start to exit.
+// TestRunner_Stop_AfterContextCancel waits for Start to exit and asserts Start
+// returned nil after the context was cancelled.
 func TestRunner_Stop_AfterContextCancel(t *testing.T) {
 	t.Parallel()
 	fq := newFakeQueue(4)
@@ -339,7 +340,8 @@ func TestRunner_Stop_AfterContextCancel(t *testing.T) {
 	})
 
 	ctx, cancel := context.WithCancel(context.Background())
-	go func() { _ = r.Start(ctx) }()
+	done := make(chan error, 1)
+	go func() { done <- r.Start(ctx) }()
 
 	// Wait until the worker is deterministically blocked on Dequeue before cancelling.
 	fq.waitBlocking()
@@ -350,9 +352,19 @@ func TestRunner_Stop_AfterContextCancel(t *testing.T) {
 	if err := r.Stop(stopCtx); err != nil {
 		t.Errorf("Stop() error = %v", err)
 	}
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Errorf("Start() error = %v, want nil", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Start() did not return after context cancel and Stop()")
+	}
 }
 
-// TestRunner_Stop_Idempotent calling Stop twice returns nil both times.
+// TestRunner_Stop_Idempotent calling Stop twice returns nil both times and
+// asserts Start returned nil.
 func TestRunner_Stop_Idempotent(t *testing.T) {
 	t.Parallel()
 	fq := newFakeQueue(4)
@@ -363,7 +375,8 @@ func TestRunner_Stop_Idempotent(t *testing.T) {
 	})
 
 	ctx, cancel := context.WithCancel(context.Background())
-	go func() { _ = r.Start(ctx) }()
+	done := make(chan error, 1)
+	go func() { done <- r.Start(ctx) }()
 	// Wait until the worker is deterministically blocked on Dequeue.
 	fq.waitBlocking()
 	cancel()
@@ -375,5 +388,14 @@ func TestRunner_Stop_Idempotent(t *testing.T) {
 	}
 	if err := r.Stop(stopCtx); err != nil {
 		t.Errorf("second Stop() error = %v", err)
+	}
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Errorf("Start() error = %v, want nil", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Start() did not return after context cancel and Stop()")
 	}
 }

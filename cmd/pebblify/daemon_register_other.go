@@ -1,5 +1,10 @@
 //go:build !linux
 
+// daemon_register_other.go: non-Linux build registers a stub that rejects the
+// daemon subcommand. The daemon depends on systemd integration and Linux-only
+// service paths, so on macOS and Windows it must run through the container
+// image; this file exists solely to keep main.go portable across GOOS targets.
+
 package main
 
 import (

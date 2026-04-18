@@ -366,8 +366,25 @@ func validate(cfg *Config, secrets Secrets) error {
 	if err := validateSave(cfg, secrets); err != nil {
 		return err
 	}
+	if err := validateConversion(cfg); err != nil {
+		return err
+	}
 	if cfg.Queue.BufferSize < 1 {
 		return fmt.Errorf("%w: queue.buffer_size must be >= 1", ErrInvalidField)
+	}
+	return nil
+}
+
+// validateConversion rejects conversion-section values that would silently
+// demote the daemon to relative-path scratch usage. An empty
+// temporary_directory is a configuration bug: filepath.Join("", jobID) in the
+// runner yields a CWD-relative directory, so workspace paths end up in the
+// invoking user's current directory rather than the operator-blessed scratch
+// area. Require an explicit absolute-or-home-relative path up front.
+func validateConversion(cfg *Config) error {
+	if strings.TrimSpace(cfg.Conversion.TemporaryDirectory) == "" {
+		return fmt.Errorf("%w: conversion.temporary_directory must not be empty",
+			ErrInvalidField)
 	}
 	return nil
 }
