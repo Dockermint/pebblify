@@ -22,7 +22,7 @@ enable = true
 host = "127.0.0.1"
 port = 2325
 
-[convertion]
+[conversion]
 temporary_directory = "/tmp"
 delete_source_snapshot = true
 

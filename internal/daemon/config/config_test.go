@@ -132,6 +132,38 @@ enable = false
 	}
 }
 
+// TestLoad_MissingConfigVersion returns ErrMissingConfigVersion when the
+// general.config_version key is absent from the TOML file.
+func TestLoad_MissingConfigVersion(t *testing.T) {
+	t.Parallel()
+	toml := `
+[general]
+` + validAPITOML() + `
+[notify]
+enable = false
+[telemetry]
+enable = false
+[health]
+enable = false
+[convertion]
+temporary_directory = "/tmp"
+[save]
+compression = "lz4"
+[save.local]
+enable = true
+local_save_directory = "/tmp/s"
+[save.scp]
+enable = false
+[save.s3]
+enable = false
+`
+	p := writeTOML(t, toml)
+	_, err := Load(p)
+	if !errors.Is(err, ErrMissingConfigVersion) {
+		t.Errorf("Load() error = %v, want %v", err, ErrMissingConfigVersion)
+	}
+}
+
 // TestLoad_InvalidPort covers each listener port constraint.
 func TestLoad_InvalidPort(t *testing.T) {
 	t.Parallel()
