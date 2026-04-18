@@ -86,6 +86,12 @@ Apply to every file, every agent:
 - Type name trigger lint → rename idiomatic
 - Only ok suppression: build tags for platform-specific code (`//go:build linux`) with clear rationale
 - Rules apply to all agents, CTO, CEO equal
+ - **NEVER** use linter suppression directives in any language: `//nolint`,                                                                                                                                                                                                                                                
+    `# hadolint ignore=`, `# shellcheck disable=`, `eslint-disable`, etc.                                                                                                                                                                                                                                                   
+    Only exception: `//go:build <platform>` for platform-specific code,                                                                                                                                                                                                                                                     
+    WITH adjacent rationale comment explaining why.                                                                                                                                                                                                                                                                         
+  - `@reviewer` MUST audit all `//go:build` directives; missing                                                                                                                                                                                                                                                             
+    rationale = BLOCK verdict.
 
 ## Authority and Rule Immutability
 
@@ -216,6 +222,14 @@ Every feature **MUST** follow iteration cycle. No skip. **CTO** orchestrate all 
         |                 verdict: APPROVE or BLOCK
         |                 if BLOCK -> back to step 7 with findings
         |
+[10b. PRE-PUSH VERIFY]  CTO MUST run locally before delegating to @sysadmin:
+        |  - `git status --porcelain` → 0 unstaged files in target scope
+        |  - `git diff --cached` reviewed
+        |  - `go build ./cmd/... ./internal/...` → 0 errors
+        |  - `go vet ./...` → 0 errors
+        |  - `golangci-lint run ./...` → 0 issues
+        |  - If Docker/compose changed: `docker build -t test .` → success
+        |  If any fails, return to step 7. CTO violation = workflow failure.
 [11. COMMIT]      CTO -> @sysadmin branches from develop, stages, commits (GPG)
         |                 verifies all gates passed (@qa, @lead-dev, @reviewer)
         |                 refuses to commit if any gate is unsatisfied
@@ -273,6 +287,8 @@ CTO **MUST** collect confirmation from responsible agents before delegate to `@s
 - [ ] No commented-out code or debug statements — `@reviewer` (step 10)
 - [ ] No hardcoded credentials — `@reviewer` (step 10)
 - [ ] No `//nolint` comments outside build tags — `@reviewer` (step 10)
+- [ ] `git status --porcelain` empty or only intended scope — CTO (step 10b)
+- [ ] Local build + vet + lint verified post-commits — CTO (step 10b)
 
 ---
 
