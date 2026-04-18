@@ -8,7 +8,7 @@ ARG TARGETARCH
 ARG VERSION=dev
 ARG REVISION=unknown
 
-RUN apk add --no-cache ca-certificates=20260413-r0 tzdata=2026a-r0
+RUN apk add --no-cache ca-certificates=20260413 tzdata=2026a
 
 WORKDIR /build
 
@@ -46,10 +46,11 @@ LABEL org.opencontainers.image.title="Pebblify" \
       org.opencontainers.image.base.name="alpine:3.22"
 
 RUN apk add --no-cache \
-        ca-certificates=20260413-r0 \
-        tzdata=2026a-r0 \
-        wget=1.25.0-r1 \
-    && adduser -D -H -u 10000 -s /sbin/nologin pebblify
+        ca-certificates=20260413 \
+        tzdata=2026a \
+        wget=1.25.0 \
+    && addgroup -g 10000 pebblify \
+    && adduser -D -H -u 10000 -G pebblify -s /sbin/nologin pebblify
 
 COPY --from=builder /build/pebblify /usr/local/bin/pebblify
 

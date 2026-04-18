@@ -39,8 +39,10 @@ ProtectHome=true
 # precedence and explicitly re-exposes the directory without write access.
 ReadOnlyPaths=/etc/pebblify
 
-# Paths the daemon must write to: snapshot output and conversion workspace.
-ReadWritePaths=/var/lib/pebblify /tmp/pebblify
+# Paths the daemon must write to: snapshot output.
+# /tmp is not listed here — PrivateTmp=true already provides the service an
+# isolated, writable /tmp; listing /tmp/pebblify would be ineffective.
+ReadWritePaths=/var/lib/pebblify
 
 # Prevent writes to kernel tunables (/proc/sys, /sys).
 ProtectKernelTunables=true
@@ -72,6 +74,42 @@ SystemCallArchitectures=native
 # @system-service covers file I/O, networking, threading, and process management
 # without permitting dangerous capabilities such as ptrace or module loading.
 SystemCallFilter=@system-service
+
+# Drop all capabilities — the daemon runs as an unprivileged user on ports >=2323
+# and requires no POSIX capabilities at all.
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+# Deny access to physical devices (/dev/sd*, /dev/mem, etc.).
+PrivateDevices=true
+
+# Prevent the service from changing the system hostname.
+ProtectHostname=true
+
+# Prevent the service from changing the system clock.
+ProtectClock=true
+
+# Prevent the service from reading kernel log buffer (/dev/kmsg).
+ProtectKernelLogs=true
+
+# Hide other processes from /proc — the daemon sees only its own subtree.
+ProtectProc=invisible
+
+# Restrict /proc entries to the daemon's own PID subtree.
+ProcSubset=pid
+
+# Prevent creation or use of namespace primitives (unshare, clone with NS flags).
+RestrictNamespaces=true
+
+# Block setuid/setgid bit execution and file creation.
+RestrictSUIDSGID=true
+
+# Isolate the kernel keyring from other services.
+KeyringMode=private
+
+# New files and directories created by the daemon are mode 600/700 by default,
+# preventing accidental world-readable snapshot or workspace artifacts.
+UMask=0077
 
 [Install]
 WantedBy=multi-user.target

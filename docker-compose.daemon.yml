@@ -1,4 +1,5 @@
 # docker-compose.daemon.yml
+# Requires Docker Compose v2.24.0+ for env_file object syntax
 #
 # Runs pebblify in daemon mode. Start with:
 #   docker compose -f docker-compose.daemon.yml up -d
@@ -50,7 +51,13 @@ services:
           # Starter caps — tune per deployment based on DB size and available hardware.
           cpus: "2"
           memory: 2G
+    networks:
+      - pebblify_net
     restart: unless-stopped
 
 volumes:
   pebblify_snapshots:
+
+networks:
+  pebblify_net:
+    driver: bridge
