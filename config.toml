@@ -1,0 +1,48 @@
+[general]
+config_version = 0
+
+[api]
+enable = false
+host = "127.0.0.1"
+port = 2324
+authentification_mode = "basic_auth"
+
+[notify]
+enable = false
+mode = "telegram"
+channel_id = ""
+
+[telemetry]
+enable = true
+mode = "prometheus"
+host = "127.0.0.1"
+port = 2323
+
+[health]
+enable = true
+host = "127.0.0.1"
+port = 2325
+
+[convertion]
+temporary_directory = "/tmp"
+delete_source_snapshot = true
+
+[save]
+compression = "lz4"
+
+[save.local]
+enable = true
+local_save_directory = "~/.snapshots"
+
+[save.scp]
+enable = false
+authentification_mode = "key"
+host = ""
+port = 0
+username = ""
+
+[save.s3]
+enable = false
+bucket_name = ""
+s3_access_key = ""
+save_path = ""

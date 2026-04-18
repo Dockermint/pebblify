@@ -105,7 +105,7 @@ install-systemd-daemon:
 	CGO_ENABLED=0 go build $(GOFLAGS) -o /usr/local/bin/$(BINARY) ./cmd/pebblify
 	install -d -m 0750 /etc/pebblify
 	@if [ ! -f /etc/pebblify/config.toml ]; then \
-		printf '[general]\nconfig_version = 0\n\n[api]\nenable = false\nhost = "127.0.0.1"\nport = 2324\nauthentification_mode = "basic_auth"\n\n[notify]\nenable = false\nmode = "telegram"\nchannel_id = ""\n\n[telemetry]\nenable = true\nmode = "prometheus"\nhost = "127.0.0.1"\nport = 2323\n\n[health]\nenable = true\nhost = "127.0.0.1"\nport = 2325\n\n[convertion]\ntemporary_directory = "/tmp"\ndelete_source_snapshot = true\n\n[save]\ncompression = "lz4"\n\n[save.local]\nenable = true\nlocal_save_directory = "~/.snapshots"\n\n[save.scp]\nenable = false\nauthentification_mode = "key"\nhost = ""\nport = 0\nusername = ""\n\n[save.s3]\nenable = false\nbucket_name = ""\ns3_access_key = ""\nsave_path = ""\n' > /etc/pebblify/config.toml; \
+		install -m 0640 config.toml /etc/pebblify/config.toml; \
 		echo "Created /etc/pebblify/config.toml"; \
 	else \
 		echo "Skipped /etc/pebblify/config.toml (already exists)"; \
