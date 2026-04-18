@@ -86,10 +86,10 @@ build-docker-linux-arm64:
 install-cli:
 	CGO_ENABLED=0 go build $(GOFLAGS) -o $(BINARY) ./cmd/pebblify
 	@if [ -n "$(GOPATH)" ] && [ -w "$(GOPATH)/bin" ]; then \
-		mv $(BINARY) $(GOPATH)/bin/$(BINARY); \
+		install -m 0755 $(BINARY) $(GOPATH)/bin/$(BINARY); \
 		echo "Installed to $(GOPATH)/bin/$(BINARY)"; \
 	else \
-		mv $(BINARY) /usr/local/bin/$(BINARY); \
+		install -m 0755 $(BINARY) /usr/local/bin/$(BINARY); \
 		echo "Installed to /usr/local/bin/$(BINARY)"; \
 	fi
 
@@ -103,15 +103,23 @@ install-systemd-daemon:
 		exit 1; \
 	fi
 	CGO_ENABLED=0 go build $(GOFLAGS) -o /usr/local/bin/$(BINARY) ./cmd/pebblify
-	install -d -m 0750 /etc/pebblify
+	@if ! getent group pebblify >/dev/null; then \
+		groupadd --system pebblify; \
+	fi
+	@if ! getent passwd pebblify >/dev/null; then \
+		useradd --system --gid pebblify --no-create-home \
+			--home-dir /var/lib/pebblify --shell /usr/sbin/nologin pebblify; \
+	fi
+	install -d -m 0750 -o pebblify -g pebblify /etc/pebblify
+	install -d -m 0750 -o pebblify -g pebblify /var/lib/pebblify
 	@if [ ! -f /etc/pebblify/config.toml ]; then \
-		install -m 0640 config.toml /etc/pebblify/config.toml; \
+		install -o pebblify -g pebblify -m 0640 config.toml /etc/pebblify/config.toml; \
 		echo "Created /etc/pebblify/config.toml"; \
 	else \
 		echo "Skipped /etc/pebblify/config.toml (already exists)"; \
 	fi
 	@if [ ! -f /etc/pebblify/.env ]; then \
-		install -m 0600 systemd/pebblify.env.example /etc/pebblify/.env; \
+		install -o pebblify -g pebblify -m 0600 systemd/pebblify.env.example /etc/pebblify/.env; \
 		echo "Created /etc/pebblify/.env"; \
 	else \
 		echo "Skipped /etc/pebblify/.env (already exists)"; \
@@ -126,8 +134,7 @@ install-systemd-daemon:
 	@echo "Installation complete. Next steps:"
 	@echo "  1. Edit /etc/pebblify/.env — fill in all PEBBLIFY_* secrets"
 	@echo "  2. Review /etc/pebblify/config.toml and adjust as needed"
-	@echo "  3. Create system user: useradd --system --no-create-home pebblify"
-	@echo "  4. Enable + start: systemctl enable --now pebblify"
+	@echo "  3. Enable + start: systemctl enable --now pebblify"
 
 # install: retained as alias for install-cli (backward compat).
 .PHONY: install
