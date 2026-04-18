@@ -1,0 +1,106 @@
+---
+id: install-cli
+title: Install the CLI
+sidebar_label: Install CLI
+sidebar_position: 1
+description: Install the pebblify binary for one-shot LevelDB-to-PebbleDB conversion on Linux and macOS.
+---
+
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
+The `pebblify` CLI is a cross-platform tool for one-shot LevelDB to PebbleDB conversion. It runs on all four supported targets: `linux/amd64`, `linux/arm64`, `darwin/amd64`, and `darwin/arm64`.
+
+:::info Platform note
+For running the **daemon**, see [Install systemd daemon](install-systemd-daemon) (Linux) or [Install via Podman](install-podman). The CLI itself is cross-platform.
+:::
+
+## Install from a release binary
+
+<Tabs>
+<TabItem value="linux-amd64" label="Linux x86-64">
+
+```bash
+TAG="v0.4.0"
+curl -fsSL "https://github.com/Dockermint/pebblify/releases/download/${TAG}/pebblify-linux-amd64" \
+  -o pebblify
+chmod +x pebblify
+sudo mv pebblify /usr/local/bin/
+```
+
+</TabItem>
+<TabItem value="linux-arm64" label="Linux arm64">
+
+```bash
+TAG="v0.4.0"
+curl -fsSL "https://github.com/Dockermint/pebblify/releases/download/${TAG}/pebblify-linux-arm64" \
+  -o pebblify
+chmod +x pebblify
+sudo mv pebblify /usr/local/bin/
+```
+
+</TabItem>
+<TabItem value="darwin-arm64" label="macOS Apple Silicon">
+
+```bash
+TAG="v0.4.0"
+curl -fsSL "https://github.com/Dockermint/pebblify/releases/download/${TAG}/pebblify-darwin-arm64" \
+  -o pebblify
+chmod +x pebblify
+sudo mv pebblify /usr/local/bin/
+```
+
+</TabItem>
+<TabItem value="darwin-amd64" label="macOS x86-64">
+
+```bash
+TAG="v0.4.0"
+curl -fsSL "https://github.com/Dockermint/pebblify/releases/download/${TAG}/pebblify-darwin-amd64" \
+  -o pebblify
+chmod +x pebblify
+sudo mv pebblify /usr/local/bin/
+```
+
+</TabItem>
+</Tabs>
+
+### Verify the binary (recommended)
+
+Starting with v0.4.0, release binaries carry SLSA provenance attestations. Verify before running:
+
+```bash
+gh attestation verify pebblify-linux-amd64 \
+  --repo Dockermint/Pebblify
+```
+
+See [release-automation](release-automation) for the full verification guide.
+
+## Install from source
+
+Requires Go 1.25 or later.
+
+```bash
+git clone https://github.com/Dockermint/pebblify.git
+cd pebblify
+make install-cli
+```
+
+`make install-cli` builds with `CGO_ENABLED=0` and installs to `$(GOPATH)/bin/pebblify` when `GOPATH` is set and writable, or `/usr/local/bin/pebblify` otherwise. No root is required when installing to `GOPATH/bin`.
+
+## Verify the installation
+
+```bash
+pebblify --version
+```
+
+## Quick conversion example
+
+```bash
+pebblify level-to-pebble ~/.gaia/data ./gaia-pebble
+```
+
+For full usage, run `pebblify --help`.
+
+:::note macOS and the daemon
+On macOS, the `pebblify daemon` subcommand exits immediately with an error. To run the daemon on macOS, use Docker or Podman. See [daemon quickstart](daemon-quickstart) for instructions.
+:::
