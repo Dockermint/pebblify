@@ -301,36 +301,84 @@ func buildMaliciousTar(t *testing.T, entryName string) string {
 	return out
 }
 
-// TestExtract_PathTraversalGuard_DotDot rejects "../escape" entry.
+// TestExtract_PathTraversalGuard_DotDot verifies that a "../escape" tar entry
+// either returns ErrUnsafePath or is safely contained; in either case no file
+// escapes outside dst.
 func TestExtract_PathTraversalGuard_DotDot(t *testing.T) {
 	t.Parallel()
 	archive := buildMaliciousTar(t, "../outside.txt")
 	dst := t.TempDir()
-	// Extract may return ErrUnsafePath or nil — either way the file must NOT
-	// appear outside dst.
-	_ = Extract(context.Background(), archive, dst)
+
+	err := Extract(context.Background(), archive, dst)
+	// safeJoin maps "../outside.txt" -> "<dst>/outside.txt" (inside root).
+	// When the entry is safely re-rooted rather than rejected, err may be nil.
+	// The invariant is: the file must NEVER appear outside dst.
+	if err != nil && !errors.Is(err, ErrUnsafePath) {
+		t.Errorf("Extract() error = %v, want nil or ErrUnsafePath", err)
+	}
 
 	parent := filepath.Dir(dst)
 	escapedPath := filepath.Join(parent, "outside.txt")
 	if _, statErr := os.Stat(escapedPath); statErr == nil {
 		t.Errorf("path traversal: file escaped to %s", escapedPath)
 	}
+
+	// Walk dst — all written files must be inside dst.
+	_ = filepath.Walk(dst, func(p string, _ os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		rel, relErr := filepath.Rel(dst, p)
+		if relErr != nil {
+			t.Errorf("walk rel error: %v", relErr)
+			return nil
+		}
+		if rel == ".." || len(rel) > 2 && rel[:3] == "../" {
+			t.Errorf("file escaped dst: %s", p)
+		}
+		return nil
+	})
 }
 
-// TestExtract_PathTraversalGuard_AbsoluteEntry verifies absolute-path entry is
-// contained within dst and does not write to the real filesystem root.
+// TestExtract_PathTraversalGuard_AbsoluteEntry verifies that an absolute-path
+// tar entry is re-rooted inside dst and never reaches a privileged path on the
+// real filesystem.
 func TestExtract_PathTraversalGuard_AbsoluteEntry(t *testing.T) {
 	t.Parallel()
-	// /etc/passwd is cleaned to <dst>/etc/passwd by safeJoin — it should NOT
-	// overwrite the real /etc/passwd.
-	archive := buildMaliciousTar(t, "/etc/passwd_pebblify_test_guard")
-	dst := t.TempDir()
-	_ = Extract(context.Background(), archive, dst)
+	// safeJoin strips the leading "/" so "/tmp/evil" maps to "<dst>/tmp/evil".
+	// We use a unique name under /tmp rather than /etc to avoid needing root.
+	victimPath := filepath.Join(t.TempDir(), "pebblify_traversal_victim.txt")
+	// Ensure it does not exist before the test.
+	_ = os.Remove(victimPath)
 
-	if _, err := os.Stat("/etc/passwd_pebblify_test_guard"); err == nil {
-		_ = os.Remove("/etc/passwd_pebblify_test_guard")
-		t.Error("absolute path entry wrote outside destination")
+	archive := buildMaliciousTar(t, victimPath)
+	dst := t.TempDir()
+	err := Extract(context.Background(), archive, dst)
+	if err != nil && !errors.Is(err, ErrUnsafePath) {
+		t.Errorf("Extract() error = %v, want nil or ErrUnsafePath", err)
 	}
+
+	// The victim path must NOT have been written at the absolute location.
+	if _, statErr := os.Stat(victimPath); statErr == nil {
+		_ = os.Remove(victimPath)
+		t.Errorf("absolute-path entry wrote to %s outside destination", victimPath)
+	}
+
+	// Walk dst — every written file must be inside dst.
+	_ = filepath.Walk(dst, func(p string, _ os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		rel, relErr := filepath.Rel(dst, p)
+		if relErr != nil {
+			t.Errorf("walk rel error: %v", relErr)
+			return nil
+		}
+		if rel == ".." || len(rel) > 2 && rel[:3] == "../" {
+			t.Errorf("file escaped dst: %s", p)
+		}
+		return nil
+	})
 }
 
 // ---- safeJoin ----
@@ -399,8 +447,8 @@ func TestDetectFormat_Table(t *testing.T) {
 		{"zip pk34", []byte{0x50, 0x4b, 0x03, 0x04, 0, 0, 0, 0}, FormatZip},
 		{"zip pk56", []byte{0x50, 0x4b, 0x05, 0x06, 0, 0, 0, 0}, FormatZip},
 		{"zip pk78", []byte{0x50, 0x4b, 0x07, 0x08, 0, 0, 0, 0}, FormatZip},
-		{"raw tar fallback", []byte{0x75, 0x73, 0x74, 0x61, 0x72, 0x00, 0x00, 0x00}, FormatTar},
 		{"empty", []byte{}, FormatUnknown},
+		{"tar_too_short_for_ustar_offset", make([]byte, 256), FormatUnknown},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -410,6 +458,43 @@ func TestDetectFormat_Table(t *testing.T) {
 				t.Errorf("detectFormat(%x) = %v, want %v", tt.magic, got, tt.want)
 			}
 		})
+	}
+}
+
+// TestDetectFormat_TarWithUSTARMagic verifies that a real tar header block
+// (512 bytes with USTAR magic at offset 257) is classified as FormatTar.
+func TestDetectFormat_TarWithUSTARMagic(t *testing.T) {
+	t.Parallel()
+	// Build a minimal valid tar archive in memory via archive/tar, then peek the
+	// first 512 bytes as detectFormat would.
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	if err := tw.WriteHeader(&tar.Header{
+		Name: "file.txt",
+		Mode: 0o644,
+		Size: 4,
+		Typeflag: tar.TypeReg,
+	}); err != nil {
+		t.Fatalf("WriteHeader: %v", err)
+	}
+	if _, err := tw.Write([]byte("data")); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	// The first 512 bytes of a tar archive are the header block; USTAR magic
+	// is written by archive/tar at offset 257.
+	magic := buf.Bytes()
+	if len(magic) < 512 {
+		t.Fatalf("tar buffer too short: %d bytes", len(magic))
+	}
+	magic = magic[:512]
+
+	got := detectFormat(magic)
+	if got != FormatTar {
+		t.Errorf("detectFormat(real tar header) = %v, want %v", got, FormatTar)
 	}
 }
 
@@ -568,37 +653,6 @@ func TestExtract_SymlinkRejected(t *testing.T) {
 				t.Errorf("Extract() created symlink %s despite ErrUnsafePath", created)
 			}
 		})
-	}
-}
-
-// TestExtract_SymlinkSafeRelativeAccepted verifies that a symlink whose
-// resolved target stays inside destDir is accepted and the symlink is created
-// with the exact linkname stored in the archive.
-//
-// Entry: "a/evil", Linkname: "../b/c"
-// Resolved: <dst>/a/../b/c = <dst>/b/c — inside dst, so valid.
-func TestExtract_SymlinkSafeRelativeAccepted(t *testing.T) {
-	t.Parallel()
-	archive := buildSymlinkTar(t, "a/evil", "../b/c")
-	dst := t.TempDir()
-
-	// Create the parent directory so MkdirAll inside writeTarEntry succeeds.
-	if err := os.MkdirAll(filepath.Join(dst, "a"), 0o755); err != nil {
-		t.Fatalf("mkdir dst/a: %v", err)
-	}
-
-	err := Extract(context.Background(), archive, dst)
-	if err != nil {
-		t.Fatalf("Extract() unexpected error: %v", err)
-	}
-
-	symlinkPath := filepath.Join(dst, "a", "evil")
-	target, readErr := os.Readlink(symlinkPath)
-	if readErr != nil {
-		t.Fatalf("Readlink(%s): %v — symlink was not created", symlinkPath, readErr)
-	}
-	if target != "../b/c" {
-		t.Errorf("symlink target = %q, want %q", target, "../b/c")
 	}
 }
 

@@ -41,7 +41,21 @@ var (
 	magicZIPPK34 = []byte{0x50, 0x4b, 0x03, 0x04}
 	magicZIPPK56 = []byte{0x50, 0x4b, 0x05, 0x06}
 	magicZIPPK78 = []byte{0x50, 0x4b, 0x07, 0x08}
+
+	// ustarMagicPosix is the "ustar\x00" signature defined by POSIX.1-1988.
+	ustarMagicPosix = []byte{'u', 's', 't', 'a', 'r', 0x00}
+	// ustarMagicGNU is the "ustar  \x00" signature emitted by GNU tar when
+	// the header carries extended GNU attributes.
+	ustarMagicGNU = []byte{'u', 's', 't', 'a', 'r', ' ', ' ', 0x00}
 )
+
+// tarHeaderPeek is the number of bytes peeked from the archive so the USTAR
+// magic at offset 257 is reachable. 512 is the tar block size.
+const tarHeaderPeek = 512
+
+// ustarMagicOffset is the offset of the USTAR signature inside the first tar
+// header block.
+const ustarMagicOffset = 257
 
 // Format identifies an archive container/compression combination.
 type Format int
@@ -289,7 +303,9 @@ func Extract(ctx context.Context, archivePath, destDir string) error {
 	defer func() { _ = f.Close() }()
 
 	br := bufio.NewReaderSize(f, 1<<20)
-	magic, _ := br.Peek(8)
+	// Peek at least the first tar block so detectFormat can validate the
+	// USTAR magic at offset 257 before classifying as raw tar.
+	magic, _ := br.Peek(tarHeaderPeek)
 
 	format := detectFormat(magic)
 	switch format {
@@ -298,14 +314,15 @@ func Extract(ctx context.Context, archivePath, destDir string) error {
 	case FormatTar, FormatTarGzip, FormatTarZstd, FormatTarLZ4:
 		return extractTarStream(ctx, br, format, destDir)
 	default:
-		return fmt.Errorf("%w: magic=%x", ErrUnknownFormat, magic)
+		return fmt.Errorf("%w: magic=%x", ErrUnknownFormat, truncateForLog(magic))
 	}
 }
 
-// detectFormat classifies archive magic bytes. Tar detection is based on the
-// POSIX "ustar" signature at offset 257, which is unreachable from an 8-byte
-// peek; we therefore treat any prefix that does not match a known compressor
-// or zip signature as raw tar and let the tar reader reject malformed input.
+// detectFormat classifies archive magic bytes. Compressor and zip signatures
+// match the first few bytes. Raw tar is accepted only when the POSIX USTAR
+// signature is present at offset 257 ("ustar\x00" or "ustar  \x00"); anything
+// else returns FormatUnknown so callers surface ErrUnknownFormat instead of
+// feeding garbage into the tar reader.
 func detectFormat(magic []byte) Format {
 	if hasPrefix(magic, magicGzip) {
 		return FormatTarGzip
@@ -319,10 +336,51 @@ func detectFormat(magic []byte) Format {
 	if hasPrefix(magic, magicZIPPK34) || hasPrefix(magic, magicZIPPK56) || hasPrefix(magic, magicZIPPK78) {
 		return FormatZip
 	}
-	if len(magic) >= 1 {
+	if hasUSTARMagic(magic) {
 		return FormatTar
 	}
 	return FormatUnknown
+}
+
+// hasUSTARMagic reports whether b carries a POSIX USTAR signature at
+// offset 257. Both the strict POSIX form ("ustar\x00") and the GNU form
+// ("ustar  \x00") are accepted.
+func hasUSTARMagic(b []byte) bool {
+	if len(b) >= ustarMagicOffset+len(ustarMagicGNU) {
+		if bytesEqual(b[ustarMagicOffset:ustarMagicOffset+len(ustarMagicGNU)], ustarMagicGNU) {
+			return true
+		}
+	}
+	if len(b) >= ustarMagicOffset+len(ustarMagicPosix) {
+		if bytesEqual(b[ustarMagicOffset:ustarMagicOffset+len(ustarMagicPosix)], ustarMagicPosix) {
+			return true
+		}
+	}
+	return false
+}
+
+// bytesEqual is a small alternative to bytes.Equal kept inline so the detect
+// path has no extra import for a six-byte comparison.
+func bytesEqual(a, b []byte) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// truncateForLog caps magic-byte dumps so error strings stay short when the
+// peek buffer holds a full tar header.
+func truncateForLog(b []byte) []byte {
+	const logCap = 16
+	if len(b) > logCap {
+		return b[:logCap]
+	}
+	return b
 }
 
 // hasPrefix reports whether b begins with prefix.
@@ -419,13 +477,8 @@ func writeTarEntry(tr *tar.Reader, hdr *tar.Header, destDir string) error {
 		}
 		return nil
 	case tar.TypeSymlink:
-		if err := validateSymlinkTarget(destDir, target, hdr.Linkname); err != nil {
-			return err
-		}
-		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-			return fmt.Errorf("repack extract: mkdir parent %s: %w", target, err)
-		}
-		return os.Symlink(hdr.Linkname, target)
+		return fmt.Errorf("%w: symlink entry %s (target %s); symlinks not allowed",
+			ErrUnsafePath, hdr.Name, hdr.Linkname)
 	default:
 		return nil
 	}
@@ -457,7 +510,8 @@ func extractZip(ctx context.Context, archivePath, destDir string) error {
 // the tar path.
 func writeZipEntry(entry *zip.File, destDir string) error {
 	if entry.Mode()&fs.ModeSymlink != 0 {
-		return fmt.Errorf("%w: zip entry %s is a symlink", ErrUnsafePath, entry.Name)
+		return fmt.Errorf("%w: symlink entry %s; symlinks not allowed",
+			ErrUnsafePath, entry.Name)
 	}
 
 	target, err := safeJoin(destDir, entry.Name)
@@ -511,30 +565,6 @@ func containsPath(root, candidate string) error {
 	}
 	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return fmt.Errorf("path %s escapes root %s", candidate, root)
-	}
-	return nil
-}
-
-// validateSymlinkTarget rejects symlink targets that would let the extracted
-// archive point outside destDir. Absolute targets are refused outright;
-// relative targets are resolved against the symlink's own directory (POSIX
-// semantics) and must remain under destDir after lexical cleaning.
-//
-// The check is lexical: it does not follow pre-existing symlinks on the
-// filesystem. Callers that extract into a directory containing attacker-
-// controlled symlinks must sanitise destDir itself beforehand.
-func validateSymlinkTarget(destDir, linkPath, linkname string) error {
-	if linkname == "" {
-		return fmt.Errorf("%w: symlink %s has empty target", ErrUnsafePath, linkPath)
-	}
-	if filepath.IsAbs(linkname) {
-		return fmt.Errorf("%w: symlink %s has absolute target %s",
-			ErrUnsafePath, linkPath, linkname)
-	}
-	resolved := filepath.Clean(filepath.Join(filepath.Dir(linkPath), linkname))
-	if err := containsPath(destDir, resolved); err != nil {
-		return fmt.Errorf("%w: symlink %s escapes destination via %s",
-			ErrUnsafePath, linkPath, linkname)
 	}
 	return nil
 }
