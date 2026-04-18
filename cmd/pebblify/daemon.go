@@ -1,5 +1,10 @@
 //go:build linux
 
+// daemon.go: the daemon subcommand is Linux-only. Systemd socket activation,
+// sd_notify readiness signalling, /etc/pebblify configuration paths, and the
+// default known_hosts lookup all assume a Linux host; macOS and Windows
+// operators run the daemon through the container image instead.
+
 package main
 
 import (
@@ -37,7 +42,11 @@ const daemonShutdownTimeout = 30 * time.Second
 // arrives.
 func daemonCmd(args []string) {
 	fs := flag.NewFlagSet("daemon", flag.ContinueOnError)
-	fs.Usage = func() { daemonUsage(fs.Output()) }
+	fs.Usage = func() {
+		if err := daemonUsage(fs.Output()); err != nil {
+			fmt.Fprintf(os.Stderr, "pebblify daemon: write usage: %v\n", err)
+		}
+	}
 	showVersion := fs.Bool("version", false, "print daemon version and exit")
 	fs.BoolVar(showVersion, "V", false, "alias for --version")
 
@@ -50,7 +59,9 @@ func daemonCmd(args []string) {
 	}
 	if fs.NArg() != 0 {
 		fmt.Fprintf(os.Stderr, "pebblify daemon does not accept positional arguments\n\n")
-		daemonUsage(os.Stderr)
+		if err := daemonUsage(os.Stderr); err != nil {
+			fmt.Fprintf(os.Stderr, "pebblify daemon: write usage: %v\n", err)
+		}
 		os.Exit(1)
 	}
 
@@ -330,11 +341,11 @@ func (a *readinessAdapter) Ready() bool {
 	return true
 }
 
-// daemonUsage prints the subcommand help to w. Write errors are deliberately
-// ignored because the caller is always an already-failing CLI invocation; a
-// failed help write would mask the primary error.
-func daemonUsage(w io.Writer) {
-	_, _ = fmt.Fprintf(w, `pebblify daemon – long-running snapshot conversion service
+// daemonUsage prints the subcommand help to w and returns any write error so
+// callers can surface it on the primary error channel instead of silently
+// dropping a broken stderr pipe.
+func daemonUsage(w io.Writer) error {
+	_, err := fmt.Fprintf(w, `pebblify daemon – long-running snapshot conversion service
 
 Usage:
   pebblify daemon [options]
@@ -348,4 +359,8 @@ Configuration:
   PEBBLIFY_CONFIG_PATH (default: ./config.toml). Secrets are read from
   environment variables only; see docs/specs/daemon-mode.md.
 `)
+	if err != nil {
+		return fmt.Errorf("write daemon usage: %w", err)
+	}
+	return nil
 }

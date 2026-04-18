@@ -317,13 +317,19 @@ func runSCPSink(ctx context.Context, session *ssh.Session, localPath string,
 	}
 
 	if err := transferFile(ctx, stdin, reader, localPath, info, remoteFile); err != nil {
+		// Close the session BEFORE Wait so the readAck helper goroutine (blocked
+		// on r.ReadByte from the session's stdout) unblocks. Without this a
+		// wedged peer would leave Wait blocking forever because stdout never
+		// EOFs, re-introducing the daemon-worker hang this teardown prevents.
 		_ = stdin.Close()
+		_ = session.Close()
 		_ = session.Wait()
 		stderrWG.Wait()
 		return annotateWithStderr(err, &stderrBuf)
 	}
 
 	if err := stdin.Close(); err != nil {
+		_ = session.Close()
 		_ = session.Wait()
 		stderrWG.Wait()
 		return annotateWithStderr(fmt.Errorf("scp sink: close stdin: %w", err), &stderrBuf)

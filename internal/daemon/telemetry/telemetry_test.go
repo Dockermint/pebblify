@@ -117,9 +117,9 @@ func TestCollectors_RecordJobEnd_Success_SetsCompletedAndClearsActive(t *testing
 	if !strings.Contains(body, `status="completed"`) {
 		t.Errorf("RecordJobEnd success: missing completed label in: %s", body)
 	}
-	// Active must be reset to 0.
-	if strings.Contains(body, "active_end} 1") {
-		t.Errorf("RecordJobEnd: active still 1 after job end: %s", body)
+	// Active must be reset to 0. Unlabeled gauge is exposed as "t_active_end <value>" (no braces).
+	if !strings.Contains(body, "t_active_end 0") {
+		t.Errorf("RecordJobEnd: active not reset to 0 after job end: %s", body)
 	}
 }
 
@@ -221,9 +221,9 @@ func TestCollectors_AddBytesDownloaded_ZeroAndNegativeSkipped(t *testing.T) {
 	c.AddBytesDownloaded(-100)
 
 	body := scrapeMetrics(t, reg)
-	// Counter should remain at 0.
-	if strings.Contains(body, "bytes_dl_zero} 1") {
-		t.Errorf("AddBytesDownloaded zero/negative incremented counter: %s", body)
+	// Counter should remain at 0. Unlabeled counter is exposed as "t_bytes_dl_zero <value>" (no braces).
+	if !strings.Contains(body, "t_bytes_dl_zero 0") {
+		t.Errorf("AddBytesDownloaded zero/negative incremented counter, expected t_bytes_dl_zero 0 in: %s", body)
 	}
 }
 

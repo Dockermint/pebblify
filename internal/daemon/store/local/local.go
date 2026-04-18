@@ -152,23 +152,31 @@ func copyFileAtomic(ctx context.Context, src, dst string) (retErr error) {
 }
 
 // fsyncDir opens destDir and issues Sync so the directory entry update from
-// the preceding Rename is flushed to disk. On platforms that do not support
-// directory fsync (Windows), Open returns an error that we treat as a no-op.
+// the preceding Rename is flushed to disk.
+//
+// ErrInvalid from Open is treated as a no-op because os.Open on a directory
+// is explicitly not supported on Windows and the daemon's build matrix spans
+// non-POSIX hosts; a legitimate ErrPermission on Linux must surface as a hard
+// failure so crash-consistency bugs are not silently ignored, so it is not
+// filtered here.
+//
+// The Sync and Close errors are combined via errors.Join so the caller sees
+// both failure modes when a bad fsync is followed by a failing close (e.g.
+// a disk that went read-only mid-operation).
 func fsyncDir(destDir string) error {
 	d, err := os.Open(destDir)
 	if err != nil {
-		// Directories cannot be opened for fsync on every platform; treat
-		// that path as best-effort rather than a hard failure.
-		if errors.Is(err, os.ErrPermission) || errors.Is(err, os.ErrInvalid) {
+		if errors.Is(err, os.ErrInvalid) {
 			return nil
 		}
 		return err
 	}
-	if syncErr := d.Sync(); syncErr != nil {
-		_ = d.Close()
-		return syncErr
+	syncErr := d.Sync()
+	closeErr := d.Close()
+	if syncErr != nil || closeErr != nil {
+		return errors.Join(syncErr, closeErr)
 	}
-	return d.Close()
+	return nil
 }
 
 // copyWithContext is io.Copy that checks ctx.Done() every 1 MiB chunk.
