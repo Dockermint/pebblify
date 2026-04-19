@@ -51,7 +51,7 @@ func TestCollectors_RecordEnqueue_IncrementsEnqueuedAndSetsDepth(t *testing.T) {
 			Namespace: "t", Name: "jobs_total", Help: "h",
 		}, []string{"status"}),
 		QueueDepth: prometheus.NewGauge(prometheus.GaugeOpts{
-			Namespace: "t", Name: "queue_depth", Help: "h",
+			Namespace: "t", Name: "queue_depth_e", Help: "h",
 		}),
 	}
 	mustRegister(t, reg, c.JobsTotal, c.QueueDepth)
@@ -62,8 +62,9 @@ func TestCollectors_RecordEnqueue_IncrementsEnqueuedAndSetsDepth(t *testing.T) {
 	if !strings.Contains(body, `status="enqueued"`) {
 		t.Errorf("RecordEnqueue: missing enqueued label in metrics: %s", body)
 	}
-	if !strings.Contains(body, "5") {
-		t.Errorf("RecordEnqueue: queue_depth 5 not in metrics: %s", body)
+	const wantDepthLine = "t_queue_depth_e 5"
+	if !strings.Contains(body, wantDepthLine) {
+		t.Errorf("RecordEnqueue: expected metric line %q in body:\n%s", wantDepthLine, body)
 	}
 }
 
@@ -80,8 +81,9 @@ func TestCollectors_RecordDequeue_UpdatesQueueDepth(t *testing.T) {
 
 	c.RecordDequeue(3)
 	body := scrapeMetrics(t, reg)
-	if !strings.Contains(body, "3") {
-		t.Errorf("RecordDequeue: depth 3 not in metrics: %s", body)
+	const wantLine = "t_queue_depth_d 3"
+	if !strings.Contains(body, wantLine) {
+		t.Errorf("RecordDequeue: expected metric line %q in body:\n%s", wantLine, body)
 	}
 }
 
@@ -97,8 +99,9 @@ func TestCollectors_RecordJobStart_SetsActiveToOne(t *testing.T) {
 	mustRegister(t, reg, c.Active)
 	c.RecordJobStart()
 	body := scrapeMetrics(t, reg)
-	if !strings.Contains(body, "1") {
-		t.Errorf("RecordJobStart: active not 1 in metrics: %s", body)
+	const wantLine = "t_active_s 1"
+	if !strings.Contains(body, wantLine) {
+		t.Errorf("RecordJobStart: expected metric line %q in body:\n%s", wantLine, body)
 	}
 }
 
@@ -172,8 +175,9 @@ func TestCollectors_AddBytesDownloaded_Accumulates(t *testing.T) {
 	c.AddBytesDownloaded(1024)
 
 	body := scrapeMetrics(t, reg)
-	if !strings.Contains(body, "2048") {
-		t.Errorf("AddBytesDownloaded: 2048 not in metrics: %s", body)
+	const wantLine = "t_bytes_dl 2048"
+	if !strings.Contains(body, wantLine) {
+		t.Errorf("AddBytesDownloaded: expected metric line %q in body:\n%s", wantLine, body)
 	}
 }
 
@@ -192,16 +196,17 @@ func TestCollectors_AddBytesUploaded_Accumulates(t *testing.T) {
 	c.AddBytesUploaded(512)
 
 	body := scrapeMetrics(t, reg)
-	if !strings.Contains(body, "1024") {
-		t.Errorf("AddBytesUploaded: 1024 not in metrics: %s", body)
+	const wantLine = "t_bytes_ul 1024"
+	if !strings.Contains(body, wantLine) {
+		t.Errorf("AddBytesUploaded: expected metric line %q in body:\n%s", wantLine, body)
 	}
 }
 
-// TestCollectors_NilSafe_AllMethodsOnNilPointer must not panic.
+// TestCollectors_NilSafe_AllMethodsOnNilPointer verifies that all Collectors
+// methods must not panic on a nil receiver regardless of argument value.
 func TestCollectors_NilSafe_AllMethodsOnNilPointer(t *testing.T) {
 	t.Parallel()
 	var c *Collectors
-	// None of these must panic.
 	c.RecordEnqueue(5)
 	c.RecordDequeue(5)
 	c.RecordJobStart()
@@ -209,8 +214,8 @@ func TestCollectors_NilSafe_AllMethodsOnNilPointer(t *testing.T) {
 	c.RecordJobEnd(time.Second, false)
 	c.AddBytesDownloaded(100)
 	c.AddBytesUploaded(100)
-	c.AddBytesDownloaded(0)  // zero value is skipped
-	c.AddBytesUploaded(-1)   // negative is skipped
+	c.AddBytesDownloaded(0)
+	c.AddBytesUploaded(-1)
 }
 
 // TestCollectors_AddBytesDownloaded_ZeroAndNegativeSkipped.
@@ -231,6 +236,28 @@ func TestCollectors_AddBytesDownloaded_ZeroAndNegativeSkipped(t *testing.T) {
 	// Counter should remain at 0. Unlabeled counter is exposed as "t_bytes_dl_zero <value>" (no braces).
 	if !strings.Contains(body, "t_bytes_dl_zero 0") {
 		t.Errorf("AddBytesDownloaded zero/negative incremented counter, expected t_bytes_dl_zero 0 in: %s", body)
+	}
+}
+
+// TestCollectors_AddBytesUploaded_ZeroAndNegativeSkipped verifies that zero and
+// negative values do not increment the BytesUploaded counter.
+func TestCollectors_AddBytesUploaded_ZeroAndNegativeSkipped(t *testing.T) {
+	t.Parallel()
+	reg := prometheus.NewRegistry()
+	c := &Collectors{
+		BytesUploaded: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: "t", Name: "bytes_ul_zero", Help: "h",
+		}),
+	}
+	mustRegister(t, reg, c.BytesUploaded)
+
+	c.AddBytesUploaded(0)
+	c.AddBytesUploaded(-100)
+
+	body := scrapeMetrics(t, reg)
+	const wantLine = "t_bytes_ul_zero 0"
+	if !strings.Contains(body, wantLine) {
+		t.Errorf("AddBytesUploaded zero/negative incremented counter, expected %q in:\n%s", wantLine, body)
 	}
 }
 

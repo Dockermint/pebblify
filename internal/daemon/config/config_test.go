@@ -690,16 +690,17 @@ enable = false
 	}
 }
 
-// TestLoad_SCPValidAuthModes checks all three SCP auth modes and asserts that
-// each mode correctly populates the corresponding secret field.
+// TestLoad_SCPValidAuthModes checks the two accepted SCP auth modes (key, password)
+// and asserts that each mode correctly populates the corresponding secret field.
+// "none" is no longer a valid mode and is tested separately in TestLoad_SCPNoneRejected.
 func TestLoad_SCPValidAuthModes(t *testing.T) {
 	tests := []struct {
-		name           string
-		mode           string
-		envKey         string
-		envVal         string
-		wantKeyPath    string
-		wantPassword   string
+		name         string
+		mode         string
+		envKey       string
+		envVal       string
+		wantKeyPath  string
+		wantPassword string
 	}{
 		{
 			name:        "key",
@@ -714,14 +715,6 @@ func TestLoad_SCPValidAuthModes(t *testing.T) {
 			envKey:       EnvSCPPassword,
 			envVal:       "pass",
 			wantPassword: "pass",
-		},
-		{
-			name:         "none",
-			mode:         SCPAuthNone,
-			envKey:       "",
-			envVal:       "",
-			wantKeyPath:  "",
-			wantPassword: "",
 		},
 	}
 	for _, tt := range tests {
@@ -768,6 +761,43 @@ enable = false
 				t.Errorf("SCPPassword = %q, want %q", got.Secrets.SCPPassword, tt.wantPassword)
 			}
 		})
+	}
+}
+
+// TestLoad_SCPNoneRejected verifies that authentification_mode = "none" is no
+// longer accepted by the validator and returns ErrInvalidSCPAuthMode.
+func TestLoad_SCPNoneRejected(t *testing.T) {
+	t.Parallel()
+	toml := `
+[general]
+config_version = 0
+` + validAPITOML() + `
+[notify]
+enable = false
+[telemetry]
+enable = false
+[health]
+enable = false
+[conversion]
+temporary_directory = "/tmp"
+[save]
+compression = "lz4"
+[save.local]
+enable = false
+local_save_directory = "/tmp/s"
+[save.scp]
+enable = true
+host = "myhost"
+port = 22
+username = "user"
+authentification_mode = "none"
+[save.s3]
+enable = false
+`
+	p := writeTOML(t, toml)
+	_, err := Load(p)
+	if !errors.Is(err, ErrInvalidSCPAuthMode) {
+		t.Errorf("Load() scp mode=%q error = %v, want %v", SCPAuthNone, err, ErrInvalidSCPAuthMode)
 	}
 }
 

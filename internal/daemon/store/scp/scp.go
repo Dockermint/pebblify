@@ -353,7 +353,11 @@ func runSCPSink(ctx context.Context, session *ssh.Session, localPath string,
 
 	cmd := "scp -t " + shellQuote(remoteDir)
 	if err := session.Start(cmd); err != nil {
+		// Close session before Wait so stderr reader unblocks: if the remote
+		// command never started, the stderr pipe stays open and io.Copy would
+		// deadlock stderrWG.Wait() forever.
 		_ = stdin.Close()
+		_ = session.Close()
 		stderrWG.Wait()
 		return annotateWithStderr(fmt.Errorf("scp sink: start: %w", err), &stderrBuf)
 	}

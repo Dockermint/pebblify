@@ -390,10 +390,19 @@ func validate(cfg *Config, secrets Secrets) error {
 // runner yields a CWD-relative directory, so workspace paths end up in the
 // invoking user's current directory rather than the operator-blessed scratch
 // area. Require an explicit absolute-or-home-relative path up front.
+//
+// applyDefaults runs expandHome before this check so a value that started with
+// "~" or "~/" has already been resolved to an absolute path. Any remaining
+// non-absolute value at this point is a literal relative path (e.g. "./tmp"
+// or "tmp/work") and is rejected to keep workspace placement predictable.
 func validateConversion(cfg *Config) error {
 	if strings.TrimSpace(cfg.Conversion.TemporaryDirectory) == "" {
 		return fmt.Errorf("%w: conversion.temporary_directory must not be empty",
 			ErrInvalidField)
+	}
+	if !filepath.IsAbs(cfg.Conversion.TemporaryDirectory) {
+		return fmt.Errorf("%w: conversion.temporary_directory must be absolute or home-relative (got %q)",
+			ErrInvalidField, cfg.Conversion.TemporaryDirectory)
 	}
 	return nil
 }
@@ -503,9 +512,11 @@ func validateSave(cfg *Config, secrets Secrets) error {
 				return fmt.Errorf("%w: %s required when save.scp.authentification_mode=password",
 					ErrMissingSecret, EnvSCPPassword)
 			}
-		case SCPAuthNone:
-			// No secret required.
 		default:
+			// SCPAuthNone is deliberately not handled here: scp.buildAuth rejects
+			// it with ErrUnsupportedAuth, so accepting it at Load time would only
+			// defer the failure to daemon startup. Falling through to the default
+			// branch produces ErrInvalidSCPAuthMode immediately.
 			return fmt.Errorf("%w: %q", ErrInvalidSCPAuthMode, cfg.Save.SCP.AuthentificationMode)
 		}
 	}
