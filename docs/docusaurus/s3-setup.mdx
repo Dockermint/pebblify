@@ -1,0 +1,146 @@
+---
+id: s3-setup
+title: S3 Setup
+sidebar_label: S3 Setup
+sidebar_position: 7
+description: Configure the Pebblify daemon to upload converted snapshots to an S3 bucket.
+---
+
+Configure the Pebblify daemon to upload converted snapshot archives to AWS S3.
+
+## How it works
+
+When `save.s3.enable = true`, the daemon uploads the repacked output archive after each successful conversion using the AWS SDK v2 `PutObject` API (per `internal/daemon/store/s3/s3.go`). Only three SDK sub-modules are imported: `config`, `credentials`, and `service/s3`.
+
+Multiple store targets can be active simultaneously. A failure on one does not prevent uploads to others.
+
+## Step 1: Create a bucket
+
+```bash
+aws s3api create-bucket \
+  --bucket pebblify-snapshots \
+  --region us-east-1
+```
+
+For regions other than `us-east-1`:
+
+```bash
+aws s3api create-bucket \
+  --bucket pebblify-snapshots \
+  --region eu-west-1 \
+  --create-bucket-configuration LocationConstraint=eu-west-1
+```
+
+## Step 2: Create a minimal IAM policy
+
+```json title="pebblify-s3-policy.json"
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "PebblifyUpload",
+      "Effect": "Allow",
+      "Action": ["s3:PutObject"],
+      "Resource": "arn:aws:s3:::pebblify-snapshots/*"
+    },
+    {
+      "Sid": "PebblifyBucketAccess",
+      "Effect": "Allow",
+      "Action": ["s3:ListBucket"],
+      "Resource": "arn:aws:s3:::pebblify-snapshots"
+    }
+  ]
+}
+```
+
+```bash
+aws iam create-policy \
+  --policy-name PebblifyS3Upload \
+  --policy-document file://pebblify-s3-policy.json
+```
+
+## Step 3: Create an IAM user and access key
+
+```bash
+aws iam create-user --user-name pebblify-daemon
+
+aws iam attach-user-policy \
+  --user-name pebblify-daemon \
+  --policy-arn arn:aws:iam::<ACCOUNT_ID>:policy/PebblifyS3Upload
+
+aws iam create-access-key --user-name pebblify-daemon
+```
+
+Copy the `AccessKeyId` and `SecretAccessKey` from the response. The secret key cannot be retrieved again.
+
+## Step 4: Set the secret key as an environment variable
+
+:::warning Security
+Never store the AWS secret key in `config.toml`.
+:::
+
+```bash
+export PEBBLIFY_S3_SECRET_KEY="your-secret-access-key"
+export AWS_REGION="us-east-1"
+```
+
+For systemd, add to `/etc/pebblify/.env`:
+
+```ini
+PEBBLIFY_S3_SECRET_KEY=your-secret-access-key
+AWS_REGION=us-east-1
+```
+
+## Step 5: Update config.toml
+
+```toml
+[save.s3]
+enable = true
+bucket_name = "pebblify-snapshots"
+s3_access_key = "AKIAIOSFODNN7EXAMPLE"
+save_path = "converted"
+```
+
+The `s3_access_key` field holds the public access key ID. It is safe to store in `config.toml`.
+
+The `save_path` field sets the S3 key prefix. With `save_path = "converted"`, an archive named `gaia-20260418_pebbledb_1713427200.tar.lz4` is stored at:
+
+```
+s3://pebblify-snapshots/converted/gaia-20260418_pebbledb_1713427200.tar.lz4
+```
+
+## Region resolution
+
+The daemon resolves the AWS region in this order:
+
+1. `AWS_REGION` environment variable
+2. `AWS_DEFAULT_REGION` environment variable
+3. AWS SDK default config chain (`~/.aws/config`)
+4. Falls back to `us-east-1` with a WARN log entry
+
+Set `AWS_REGION` explicitly to avoid the fallback.
+
+## Output filename format
+
+```
+<original_archive_name>_pebbledb_<unix_timestamp>.<extension>
+```
+
+The extension is determined by `save.compression`:
+
+| `save.compression` | Output extension |
+| :----------------- | :--------------- |
+| `lz4`              | `.tar.lz4`       |
+| `zstd`             | `.tar.zst`       |
+| `gzip`             | `.tar.gz`        |
+| `none`             | `.tar`           |
+| `zip`              | `.zip`           |
+
+## Troubleshooting
+
+| Symptom                                 | Likely cause                                    | Fix                                              |
+| :-------------------------------------- | :---------------------------------------------- | :----------------------------------------------- |
+| `s3: missing required secret` at startup | `PEBBLIFY_S3_SECRET_KEY` not set               | Export the variable before starting.            |
+| `AccessDenied` on upload                | IAM policy missing `s3:PutObject` for the key  | Update the IAM policy.                          |
+| `NoSuchBucket`                          | Bucket does not exist or wrong region           | Create the bucket or set `AWS_REGION`.          |
+| WARN: `s3 region not detected`          | `AWS_REGION` unset, no shared config            | Set `export AWS_REGION=<region>`.               |

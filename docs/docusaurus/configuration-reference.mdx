@@ -1,0 +1,265 @@
+---
+id: configuration-reference
+title: Configuration Reference
+sidebar_label: Configuration Reference
+sidebar_position: 5
+description: Full reference for the Pebblify daemon config.toml schema and environment variables.
+---
+
+Full reference for all `config.toml` keys and environment variables accepted by the Pebblify daemon.
+
+The config file path resolves in this order:
+1. `PEBBLIFY_CONFIG_PATH` environment variable
+2. `./config.toml` (default)
+
+Source: `internal/daemon/config/config.go`
+
+## [general]
+
+<details>
+<summary>Required. Schema version gate.</summary>
+
+| Key              | Type | Default | Description                                       |
+| :--------------- | :--- | :------ | :------------------------------------------------ |
+| `config_version` | int  | —       | Must be `0` in v0.4.0. Absent or higher value = fatal startup error. |
+
+```toml
+[general]
+config_version = 0
+```
+
+</details>
+
+## [api]
+
+<details open>
+<summary>HTTP control plane. Always active — no enable flag.</summary>
+
+| Key                     | Type   | Default        | Valid values              | Notes                                                         |
+| :---------------------- | :----- | :------------- | :------------------------ | :------------------------------------------------------------ |
+| `host`                  | string | `"127.0.0.1"`  | Any bind address          | Bind address for the API listener.                           |
+| `port`                  | int    | `2324`         | `1–65535`                 | TCP port.                                                    |
+| `authentification_mode` | string | `"basic_auth"` | `basic_auth`, `unsecure`  | `basic_auth` requires `PEBBLIFY_BASIC_AUTH_TOKEN`. `unsecure` emits a WARN log. |
+
+:::warning
+`authentification_mode = "unsecure"` is not recommended for production. The daemon logs a warning on every startup.
+:::
+
+```toml
+[api]
+host = "127.0.0.1"
+port = 2324
+authentification_mode = "basic_auth"
+```
+
+</details>
+
+## [notify]
+
+<details>
+<summary>Job lifecycle notifications. Disabled by default.</summary>
+
+| Key          | Type   | Default      | Valid values    | Notes                                                                      |
+| :----------- | :----- | :----------- | :-------------- | :------------------------------------------------------------------------- |
+| `enable`     | bool   | `false`      | `true`, `false` | Toggles notifications.                                                    |
+| `mode`       | string | `"telegram"` | `telegram`      | Only `telegram` is valid in v0.4.0.                                       |
+| `channel_id` | string | `""`         | Chat ID string  | Required when `enable = true`. Telegram chat or channel ID (may be negative). |
+
+When `notify.enable = true`:
+- `PEBBLIFY_TELEGRAM_BOT_TOKEN` environment variable is required.
+- `channel_id` must be non-empty.
+- Missing either is a fatal startup error.
+
+```toml
+[notify]
+enable = true
+mode = "telegram"
+channel_id = "-1001234567890"
+```
+
+</details>
+
+## [telemetry]
+
+<details>
+<summary>Prometheus metrics endpoint.</summary>
+
+| Key      | Type   | Default        | Notes                                             |
+| :------- | :----- | :------------- | :------------------------------------------------ |
+| `enable` | bool   | `true`         | Toggles the `/metrics` listener.                 |
+| `mode`   | string | `"prometheus"` | Only `prometheus` is valid.                      |
+| `host`   | string | `"127.0.0.1"`  | Bind address.                                    |
+| `port`   | int    | `2323`         | TCP port.                                        |
+
+```toml
+[telemetry]
+enable = true
+mode = "prometheus"
+host = "127.0.0.1"
+port = 2323
+```
+
+</details>
+
+## [health]
+
+<details>
+<summary>Liveness and readiness probes.</summary>
+
+| Key      | Type   | Default       | Notes                                             |
+| :------- | :----- | :------------ | :------------------------------------------------ |
+| `enable` | bool   | `true`        | Toggles the `/healthz` and `/readyz` listener.   |
+| `host`   | string | `"127.0.0.1"` | Bind address.                                    |
+| `port`   | int    | `2325`        | TCP port.                                        |
+
+- `GET /healthz` — liveness, always `200 OK` while running.
+- `GET /readyz` — readiness, `200 OK` only when queue is empty and no job is running.
+
+```toml
+[health]
+enable = true
+host = "127.0.0.1"
+port = 2325
+```
+
+</details>
+
+## [convertion]
+
+<details>
+<summary>Temporary directory and source cleanup settings.</summary>
+
+:::note Spelling
+The TOML key is `convertion` (matching the Go struct tag). This spelling is intentionally preserved to avoid a breaking schema change.
+:::
+
+| Key                      | Type   | Default  | Notes                                                              |
+| :----------------------- | :----- | :------- | :----------------------------------------------------------------- |
+| `temporary_directory`    | string | `"/tmp"` | Scratch directory for download, extraction, conversion, repacking. Supports `~` prefix. |
+| `delete_source_snapshot` | bool   | `true`   | Remove the source LevelDB directory after conversion.              |
+
+```toml
+[convertion]
+temporary_directory = "/tmp"
+delete_source_snapshot = true
+```
+
+</details>
+
+## [save]
+
+<details open>
+<summary>Output archive compression and storage targets.</summary>
+
+| Key           | Type   | Default | Valid values                      | Notes                              |
+| :------------ | :----- | :------ | :-------------------------------- | :--------------------------------- |
+| `compression` | string | `"lz4"` | `none`, `lz4`, `zstd`, `gzip`, `zip` | Codec for the output archive. |
+
+```toml
+[save]
+compression = "lz4"
+```
+
+</details>
+
+### [save.local]
+
+<details>
+<summary>Local filesystem storage target.</summary>
+
+| Key                    | Type   | Default          | Notes                                                  |
+| :--------------------- | :----- | :--------------- | :----------------------------------------------------- |
+| `enable`               | bool   | `true`           | Toggles the local storer.                             |
+| `local_save_directory` | string | `"~/.snapshots"` | Output directory. Required when `enable = true`. Supports `~` prefix. |
+
+```toml
+[save.local]
+enable = true
+local_save_directory = "~/.snapshots"
+```
+
+</details>
+
+### [save.scp]
+
+<details>
+<summary>SCP/SSH storage target. Disabled by default.</summary>
+
+| Key                     | Type   | Default | Valid values              | Env override          | Notes                              |
+| :---------------------- | :----- | :------ | :------------------------ | :-------------------- | :--------------------------------- |
+| `enable`                | bool   | `false` | `true`, `false`           | —                     | Toggles the SCP storer.            |
+| `authentification_mode` | string | `"key"` | `key`, `password`, `none` | —                     | SSH authentication method.        |
+| `host`                  | string | `""`    | Hostname or IP            | —                     | Required when `enable = true`.    |
+| `port`                  | int    | `0`     | `1–65535`                 | —                     | Required when `enable = true`.    |
+| `username`              | string | `""`    | SSH login name            | —                     | Required when `enable = true`.    |
+
+Secret env vars:
+- `PEBBLIFY_SCP_KEY_PATH` — required when `authentification_mode = key`
+- `PEBBLIFY_SCP_PASSWORD` — required when `authentification_mode = password`
+
+```toml
+[save.scp]
+enable = true
+authentification_mode = "key"
+host = "backup.example.com"
+port = 22
+username = "pebblify"
+```
+
+</details>
+
+### [save.s3]
+
+<details>
+<summary>AWS S3 storage target. Disabled by default.</summary>
+
+| Key            | Type   | Default | Notes                                                                              |
+| :------------- | :----- | :------ | :--------------------------------------------------------------------------------- |
+| `enable`       | bool   | `false` | Toggles the S3 storer.                                                             |
+| `bucket_name`  | string | `""`    | Destination bucket. Required when `enable = true`.                                |
+| `s3_access_key`| string | `""`    | AWS access key ID. Required when `enable = true`. Safe to store in config.toml.   |
+| `save_path`    | string | `""`    | Key prefix. Final S3 key: `<save_path>/<filename>`. May be empty.                 |
+
+Secret env var: `PEBBLIFY_S3_SECRET_KEY` — required when `enable = true`.
+
+Region resolution order: `AWS_REGION` → `AWS_DEFAULT_REGION` → SDK default config → `us-east-1` (with WARN log).
+
+```toml
+[save.s3]
+enable = true
+bucket_name = "pebblify-snapshots"
+s3_access_key = "AKIAIOSFODNN7EXAMPLE"
+save_path = "converted"
+```
+
+</details>
+
+## [queue]
+
+<details>
+<summary>Job queue capacity. Optional section.</summary>
+
+| Key           | Type | Default | Valid values | Notes                                                               |
+| :------------ | :--- | :------ | :----------- | :------------------------------------------------------------------ |
+| `buffer_size` | int  | `64`    | `>= 1`       | Maximum pending jobs in FIFO. Full buffer = new submissions get `503`. |
+
+```toml
+[queue]
+buffer_size = 64
+```
+
+</details>
+
+## Environment variables
+
+| Variable                      | Required when                                           | Description                                |
+| :---------------------------- | :------------------------------------------------------ | :----------------------------------------- |
+| `PEBBLIFY_CONFIG_PATH`        | Never                                                   | Config file path override.                 |
+| `PEBBLIFY_LOG_LEVEL`          | Never                                                   | `trace`, `debug`, `info`, `warn`, `error`. Default: `info`. |
+| `PEBBLIFY_BASIC_AUTH_TOKEN`   | `api.authentification_mode = basic_auth`                | API bearer token.                          |
+| `PEBBLIFY_TELEGRAM_BOT_TOKEN` | `notify.enable = true` and `notify.mode = telegram`     | Telegram Bot API token. Never logged.      |
+| `PEBBLIFY_SCP_KEY_PATH`       | `save.scp.enable = true` and `authentification_mode = key`      | SSH private key path.         |
+| `PEBBLIFY_SCP_PASSWORD`       | `save.scp.enable = true` and `authentification_mode = password` | SSH login password.           |
+| `PEBBLIFY_S3_SECRET_KEY`      | `save.s3.enable = true`                                 | AWS secret access key.                     |
+| `AWS_REGION`                  | `save.s3.enable = true` (recommended)                   | AWS region for S3 uploads.                 |
+| `AWS_DEFAULT_REGION`          | `save.s3.enable = true` (alternative)                   | Fallback AWS region.                       |

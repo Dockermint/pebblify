@@ -1,0 +1,193 @@
+---
+id: daemon-quickstart
+title: Daemon Quickstart
+sidebar_label: Daemon Quickstart
+sidebar_position: 4
+description: Run the Pebblify daemon to accept and process snapshot conversion jobs over HTTP.
+---
+
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
+Run Pebblify as a long-running service that accepts snapshot conversion jobs over HTTP.
+
+:::danger Linux only
+`pebblify daemon` requires Linux. On macOS, the command exits immediately with an error. Use the Docker or Podman path below.
+:::
+
+## Prerequisites
+
+- Linux host (amd64 or arm64), or Docker/Podman on any platform
+- Pebblify binary installed via `make install-cli` or a release binary
+- A `config.toml` file
+
+## Choose your platform
+
+<Tabs>
+<TabItem value="linux" label="Linux (native)">
+
+### Step 1: Create a config file
+
+```toml title="config.toml"
+[general]
+config_version = 0
+
+[api]
+host = "127.0.0.1"
+port = 2324
+authentification_mode = "basic_auth"
+
+[notify]
+enable = false
+mode = "telegram"
+channel_id = ""
+
+[telemetry]
+enable = true
+mode = "prometheus"
+host = "127.0.0.1"
+port = 2323
+
+[health]
+enable = true
+host = "127.0.0.1"
+port = 2325
+
+[convertion]
+temporary_directory = "/tmp"
+delete_source_snapshot = true
+
+[save]
+compression = "lz4"
+
+[save.local]
+enable = true
+local_save_directory = "~/.snapshots"
+
+[save.scp]
+enable = false
+authentification_mode = "key"
+host = ""
+port = 0
+username = ""
+
+[save.s3]
+enable = false
+bucket_name = ""
+s3_access_key = ""
+save_path = ""
+```
+
+### Step 2: Set the API token
+
+```bash
+export PEBBLIFY_BASIC_AUTH_TOKEN="your-secret-token-here"
+```
+
+### Step 3: Start the daemon
+
+```bash
+pebblify daemon
+```
+
+</TabItem>
+<TabItem value="docker" label="macOS / Docker">
+
+```bash
+# Create .env with your secrets
+cat > .env <<EOF
+PEBBLIFY_BASIC_AUTH_TOKEN=your-secret-token-here
+EOF
+
+# Download config.toml and set save directory to the volume path
+curl -fsSL https://raw.githubusercontent.com/Dockermint/pebblify/main/config.toml \
+  -o config.toml
+
+# Start the daemon
+docker compose -f docker-compose.daemon.yml up -d
+```
+
+The API, health, and metrics ports are exposed at `127.0.0.1:2324`, `2325`, and `2323` respectively.
+
+</TabItem>
+<TabItem value="podman" label="Linux / Podman">
+
+After running `make install-podman`:
+
+```bash
+systemctl --user daemon-reload
+systemctl --user start pebblify
+```
+
+</TabItem>
+</Tabs>
+
+## Submit a job
+
+```bash
+curl -s -X POST http://127.0.0.1:2324/v1/jobs \
+  -u "ignored:${PEBBLIFY_BASIC_AUTH_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://snapshots.example.com/gaia-snapshot-20260418.tar.lz4"}'
+```
+
+The daemon returns `201 Created` immediately. Conversion happens asynchronously.
+
+```json
+{
+  "job_id": "3f8a2c1d4e5b6f7a8c9d0e1f2a3b4c5d",
+  "queue_depth": 1
+}
+```
+
+:::info Supported archive formats
+`.tar`, `.tar.gz`, `.tar.lz4`, `.tar.zst`, `.zip`
+:::
+
+## Check status
+
+```bash
+curl -s http://127.0.0.1:2324/v1/status \
+  -u "ignored:${PEBBLIFY_BASIC_AUTH_TOKEN}"
+```
+
+```json
+{
+  "version": "0.4.0",
+  "queue_depth": 0,
+  "current": null,
+  "uptime_seconds": 42
+}
+```
+
+## Check health
+
+```bash
+# Liveness — 200 while the process is alive
+curl -s http://127.0.0.1:2325/healthz
+
+# Readiness — 200 when idle, 503 when a job is running or queued
+curl -s http://127.0.0.1:2325/readyz
+```
+
+## What happens when you submit a job
+
+The daemon processes each job through a sequential pipeline:
+
+1. Download archive to `convertion.temporary_directory`
+2. Extract and detect LevelDB directories
+3. Convert each LevelDB directory to PebbleDB
+4. Verify the converted data
+5. Repack into a new archive using the configured compression
+6. Upload to all enabled save targets (local, SCP, S3)
+7. Clean up the temporary directory
+8. Send a Telegram notification (if enabled)
+
+The output archive is named: `<original_name>_pebbledb_<unix_timestamp>.<extension>`
+
+## Next steps
+
+- [Configuration reference](configuration-reference) — all TOML keys and environment variables
+- [API reference](daemon-api) (in the plain Markdown docs) — full request/response schemas
+- [Telegram integration](telegram-integration) — job notifications
+- [S3 setup](s3-setup) — upload converted snapshots to S3

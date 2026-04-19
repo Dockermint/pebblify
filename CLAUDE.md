@@ -86,6 +86,12 @@ Apply to every file, every agent:
 - Type name trigger lint → rename idiomatic
 - Only ok suppression: build tags for platform-specific code (`//go:build linux`) with clear rationale
 - Rules apply to all agents, CTO, CEO equal
+ - **NEVER** use linter suppression directives in any language: `//nolint`,                                                                                                                                                                                                                                                
+    `# hadolint ignore=`, `# shellcheck disable=`, `eslint-disable`, etc.                                                                                                                                                                                                                                                   
+    Only exception: `//go:build <platform>` for platform-specific code,                                                                                                                                                                                                                                                     
+    WITH adjacent rationale comment explaining why.                                                                                                                                                                                                                                                                         
+  - `@reviewer` MUST audit all `//go:build` directives; missing                                                                                                                                                                                                                                                             
+    rationale = BLOCK verdict.
 
 ## Authority and Rule Immutability
 
@@ -137,7 +143,7 @@ Each agent got **exclusive write scope**. No two agents write same files.
 | `docs/specs/`, `docs/ROADMAP.md`                 | `software-architect` | Read-only|
 | `docs/markdown/`, `docs/docusaurus/`, `README`   | `technical-writer` | Read-only  |
 | `.github/`                                       | `devops`           | Read-only  |
-| `Dockerfile*`, `docker-compose*.yml`, `**/*.container`, `**/*.pod`, `**/*.volume`, `**/*.network`, `.dockerignore` | `container-engineer` | Read-only |
+| Dockerfile*, docker-compose*.yml, **/*.container, **/*.pod, **/*.volume, **/*.network, **/*.service, **/*.socket, **/*.timer, systemd/**, .dockerignore | container-engineer | Read-only |
 | Git operations                                   | `sysadmin`         | Forbidden  |
 | Web research                                     | `assistant`        | Forbidden  |
 
@@ -148,6 +154,10 @@ Each agent got **exclusive write scope**. No two agents write same files.
 - **Architecture questions**: `@software-architect` always ask CEO for unspecified requirements, never invent.
 - **Container/Docker work**: `@container-engineer` = sole producer of container artifacts.
 - **Retrocontrol**: `@it-consultant` propose rule tightenings, **NEVER** relax.
+
+### Security
+
+- **Environment templates**: `.env.example`, `systemd/*.env.example` must contain placeholders only. No real secrets, API keys, passwords, or PII. Format: `VAR_NAME=` (empty) or `VAR_NAME={{placeholder}}`. Pre-commit verify no secrets leaked via templates.                                                                      
 
 ### Rules for All Agents
 
@@ -212,6 +222,14 @@ Every feature **MUST** follow iteration cycle. No skip. **CTO** orchestrate all 
         |                 verdict: APPROVE or BLOCK
         |                 if BLOCK -> back to step 7 with findings
         |
+[10b. PRE-PUSH VERIFY]  CTO MUST run locally before delegating to @sysadmin:
+        |  - `git status --porcelain` → 0 unstaged files in target scope
+        |  - `git diff --cached` reviewed
+        |  - `go build ./cmd/... ./internal/...` → 0 errors
+        |  - `go vet ./...` → 0 errors
+        |  - `golangci-lint run ./...` → 0 issues
+        |  - If Docker/compose changed: `docker build -t test .` → success
+        |  If any fails, return to step 7. CTO violation = workflow failure.
 [11. COMMIT]      CTO -> @sysadmin branches from develop, stages, commits (GPG)
         |                 verifies all gates passed (@qa, @lead-dev, @reviewer)
         |                 refuses to commit if any gate is unsatisfied
@@ -221,10 +239,21 @@ Every feature **MUST** follow iteration cycle. No skip. **CTO** orchestrate all 
         |                 links to issue from step 5 (Closes #<number>)
         |                 CEO opens the PR manually
         |
+[12b. ISSUE AUDIT] CTO -> @sysadmin verifies issue closure post-merge:
+        |                 - Confirm issue #N closed automatically via `Closes #<number>` link
+        |                 - If issue still open after PR merge: manually close
+        |                 - Closure comment: "Resolved via Closes #<PR_NUMBER>"
+        |                 - Report closure confirmation to CTO
+        |
 [13. CI]          @devops maintains the pipeline. CEO merges ONLY after:
         |                 - CI pipeline is fully green (all checks pass)
         |                 - CodeRabbit has approved (no unresolved comments)
-        |                 If CI fails -> back to step 7 with CI error context
+        |                 If CI fails (1st iteration):
+        |                   - return to step 7 with CI error context
+        |                 If CI fails (2nd+ iteration):
+        |                   - CTO MUST send diagnosis + attempted fixes to @it-consultant
+        |                   - @it-consultant audits root cause + recommends fix strategy
+        |                   - CTO applies recommendations, only THEN delegates @go-developer
         |                 If CodeRabbit raises issues -> fix, commit, resolve
         |
 [14. DOCS]        CTO -> @technical-writer updates documentation post-merge
@@ -246,6 +275,9 @@ Every feature **MUST** follow iteration cycle. No skip. **CTO** orchestrate all 
 - **Step 13 loops** with step 7 till CI pass + CodeRabbit resolved. Fix root cause — never suppress lints, skip tests, add `//nolint` to pass CI. **No agent merge** — only CEO, only once CI + CodeRabbit approved.
 - **1 PR = 1 feature = 1 issue** (strict). PR close exactly one issue via `Closes #<number>`. No bundle unrelated change. `@sysadmin` enforce gate before commit.
 - CodeRabbit comments **MUST** be addressed + marked resolved once fixed.
+  - @sysadmin MUST resolve each CodeRabbit thread via `gh api` or GitHub PR review API.
+  - Each resolution MUST include commit hash reference that fixed the issue.
+  - Silent closure forbidden — full audit trail (API records + commit linkage) mandatory.
 - `@technical-writer` invoked after merge.
 - `@it-consultant` invoked anytime to verify CLAUDE.md compliance + audit agent scope.
 - CEO give small task (bugfix, typo, config), `@software-architect` step reduce to brief assessment, but never fully skip.
@@ -269,6 +301,8 @@ CTO **MUST** collect confirmation from responsible agents before delegate to `@s
 - [ ] No commented-out code or debug statements — `@reviewer` (step 10)
 - [ ] No hardcoded credentials — `@reviewer` (step 10)
 - [ ] No `//nolint` comments outside build tags — `@reviewer` (step 10)
+- [ ] `git status --porcelain` empty or only intended scope — CTO (step 10b)
+- [ ] Local build + vet + lint verified post-commits — CTO (step 10b)
 
 ---
 

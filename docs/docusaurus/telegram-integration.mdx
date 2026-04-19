@@ -1,0 +1,116 @@
+---
+id: telegram-integration
+title: Telegram Integration
+sidebar_label: Telegram Notifications
+sidebar_position: 6
+description: Configure Pebblify to send Telegram notifications for daemon job events.
+---
+
+Configure the Pebblify daemon to send Telegram messages when jobs start, complete, or fail.
+
+## How it works
+
+The daemon calls the Telegram Bot API (`https://api.telegram.org/bot<token>/sendMessage`) using `net/http` and `encoding/json` from the Go standard library. No third-party Telegram library is used (per `internal/daemon/notify/telegram.go`).
+
+Notification failure is non-fatal: the worker logs the error and continues to process the next job.
+
+## Step 1: Create a Telegram bot
+
+1. Open Telegram and start a conversation with `@BotFather`.
+2. Send `/newbot` and follow the prompts.
+3. BotFather returns a token like `123456789:ABCdefGhIJKlmNoPQRstUVwxyZ`. Store it securely.
+
+## Step 2: Get your channel or chat ID
+
+### Private chat
+
+1. Send any message to your bot.
+2. Open `https://api.telegram.org/bot<YOUR_TOKEN>/getUpdates`.
+3. Find `"chat"."id"` in the response — that is your chat ID.
+
+### Channel
+
+1. Add the bot as a channel administrator.
+2. Post a message to the channel.
+3. Fetch `/getUpdates`. The channel ID is a large negative integer like `-1001234567890`.
+
+## Step 3: Set the bot token as an environment variable
+
+:::warning Security
+Never store the bot token in `config.toml`. It belongs exclusively in an environment variable.
+:::
+
+```bash
+export PEBBLIFY_TELEGRAM_BOT_TOKEN="123456789:ABCdefGhIJKlmNoPQRstUVwxyZ"
+```
+
+For systemd, add to `/etc/pebblify/.env`:
+
+```ini
+PEBBLIFY_TELEGRAM_BOT_TOKEN=123456789:ABCdefGhIJKlmNoPQRstUVwxyZ
+```
+
+For Podman Quadlet, add to `~/.pebblify/.env`.
+
+## Step 4: Update config.toml
+
+```toml
+[notify]
+enable = true
+mode = "telegram"
+channel_id = "-1001234567890"
+```
+
+Set `channel_id` to the value from Step 2. Include the minus sign for group or channel IDs.
+
+## Step 5: Restart the daemon
+
+```bash
+# Native
+pebblify daemon
+
+# systemd
+sudo systemctl restart pebblify
+
+# Podman Quadlet
+systemctl --user restart pebblify
+```
+
+The startup log confirms notifications are active:
+
+```
+{"level":"INFO","msg":"pebblify daemon started","notify_enabled":true,...}
+```
+
+## Retry behavior
+
+| Telegram API response | Daemon behavior                                         |
+| :-------------------- | :------------------------------------------------------ |
+| 2xx                   | Success                                                 |
+| 5xx                   | One retry after 500 ms                                  |
+| 4xx                   | Permanent failure, logged at ERROR, no retry            |
+| Transport error       | Non-retryable, logged                                   |
+
+The bot token is never included in log lines. Logs reference only the `channel_id` and HTTP status code.
+
+## Notification format
+
+Messages are sent with `parse_mode=HTML`. Example for a completed job:
+
+```
+Pebblify job completed
+ID: 3f8a2c1d...
+URL: https://snapshots.example.com/gaia-20260418.tar.lz4
+```
+
+For failed jobs, an `Error:` line is appended. All user-supplied content is HTML-escaped before inclusion.
+
+## Troubleshooting
+
+| Symptom                        | Likely cause                              | Fix                                                    |
+| :----------------------------- | :---------------------------------------- | :----------------------------------------------------- |
+| No messages received           | `notify.enable = false`                   | Set `enable = true` and restart.                      |
+| Startup error: missing secret  | `PEBBLIFY_TELEGRAM_BOT_TOKEN` unset       | Export the variable before starting.                  |
+| 401 from Telegram              | Invalid bot token                         | Revoke and regenerate via BotFather.                  |
+| 400 — chat not found           | Wrong `channel_id` or bot not in channel  | Verify the ID; ensure bot is a channel admin.         |
+| Notifications after failures only | Normal — success + failure both trigger notifications | Check `notify.enable = true` and mode. |

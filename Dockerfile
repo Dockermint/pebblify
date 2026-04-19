@@ -8,7 +8,12 @@ ARG TARGETARCH
 ARG VERSION=dev
 ARG REVISION=unknown
 
-RUN apk add --no-cache ca-certificates tzdata
+# Alpine package pins are exact (including -rN revision). Rotation to a new
+# revision will break this build; bump manually on Alpine package updates.
+# Automated bumps deferred to v0.5.x (Renovate config).
+RUN apk add --no-cache \
+        ca-certificates=20260413-r0 \
+        tzdata=2026a-r0
 
 WORKDIR /build
 
@@ -33,7 +38,7 @@ ARG REVISION=unknown
 ARG CREATED=unknown
 
 LABEL org.opencontainers.image.title="Pebblify" \
-      org.opencontainers.image.description="LevelDB to PebbleDB migration tool for Cosmos/CometBFT nodes." \
+      org.opencontainers.image.description="LevelDB to PebbleDB migration tool and long-running daemon for Cosmos/CometBFT nodes (CLI + daemon modes)." \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.revision="${REVISION}" \
       org.opencontainers.image.source="https://github.com/Dockermint/Pebblify" \
@@ -45,15 +50,22 @@ LABEL org.opencontainers.image.title="Pebblify" \
       org.opencontainers.image.created="${CREATED}" \
       org.opencontainers.image.base.name="alpine:3.22"
 
-RUN apk add --no-cache ca-certificates tzdata curl \
-    && adduser -D -H -u 10000 -s /sbin/nologin appuser
+# Alpine package pins are exact (including -rN revision). Rotation to a new
+# revision will break this build; bump manually on Alpine package updates.
+# Automated bumps deferred to v0.5.x (Renovate config).
+RUN apk add --no-cache \
+        ca-certificates=20260413-r0 \
+        tzdata=2026a-r0 \
+        wget=1.25.0-r1 \
+    && addgroup -g 10000 pebblify \
+    && adduser -D -H -u 10000 -G pebblify -s /sbin/nologin pebblify
 
 COPY --from=builder /build/pebblify /usr/local/bin/pebblify
 
+# CLI legacy health port + metrics port
 EXPOSE 8086 9090
-
-HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8086/healthz/live || exit 1
+# Daemon: Prometheus/telemetry (2323), REST API (2324), Health (2325)
+EXPOSE 2323 2324 2325
 
 USER 10000:10000
 

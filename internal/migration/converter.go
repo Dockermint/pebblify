@@ -17,8 +17,8 @@ import (
 	"github.com/Dockermint/Pebblify/internal/batcher"
 	"github.com/Dockermint/Pebblify/internal/fsutil"
 	"github.com/Dockermint/Pebblify/internal/metrics"
-	"github.com/Dockermint/Pebblify/internal/prom"
 	"github.com/Dockermint/Pebblify/internal/progress"
+	"github.com/Dockermint/Pebblify/internal/prom"
 	"github.com/Dockermint/Pebblify/internal/state"
 )
 

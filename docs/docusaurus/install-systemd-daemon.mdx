@@ -1,0 +1,130 @@
+---
+id: install-systemd-daemon
+title: Install Systemd Daemon
+sidebar_label: Install (systemd)
+sidebar_position: 2
+description: Install and configure the Pebblify daemon as a systemd service on Linux.
+---
+
+:::danger Linux only
+`pebblify daemon` and the systemd install target are **Linux-only**. There is no macOS systemd path. macOS users must use Docker Compose or Podman — see [daemon quickstart](daemon-quickstart).
+:::
+
+## Prerequisites
+
+- Linux host (amd64 or arm64)
+- `sudo` / root access
+- Pebblify source cloned locally (`git clone https://github.com/Dockermint/pebblify.git`)
+
+## Step 1: Run the installer
+
+```bash
+sudo make install-systemd-daemon
+```
+
+The installer performs these steps:
+
+1. Builds the binary with `CGO_ENABLED=0` and installs it to `/usr/local/bin/pebblify`.
+2. Creates `/etc/pebblify/` (mode `0750`, owned `root:root`).
+3. Writes `/etc/pebblify/config.toml` from a template with sane defaults. **Does not overwrite** if the file already exists.
+4. Copies `systemd/pebblify.env.example` to `/etc/pebblify/.env` (mode `0600`, owned `root:root`). **Does not overwrite** if the file already exists.
+5. Copies `systemd/pebblify.service` to `/etc/systemd/system/pebblify.service`. **Does not overwrite** if the file already exists.
+6. Prints next steps.
+
+The installer does **not** run `systemctl enable` or `systemctl start`. You control when the service starts.
+
+## Step 2: Create the system user
+
+The unit file runs as `User=pebblify`. Create that user before starting the service:
+
+```bash
+sudo useradd --system --no-create-home --shell /usr/sbin/nologin pebblify
+```
+
+## Step 3: Configure the daemon
+
+Edit `/etc/pebblify/config.toml`:
+
+```bash
+sudo nano /etc/pebblify/config.toml
+```
+
+At minimum, configure where converted snapshots are saved:
+
+```toml
+[save.local]
+enable = true
+local_save_directory = "/var/lib/pebblify/snapshots"
+```
+
+See [configuration-reference](configuration-reference) for all available keys.
+
+## Step 4: Set secrets in the env file
+
+Edit `/etc/pebblify/.env`. This file is mode `0600` and is loaded by the systemd unit via `EnvironmentFile=`:
+
+```ini
+PEBBLIFY_BASIC_AUTH_TOKEN=your-secret-token-here
+# Uncomment if using Telegram notifications:
+# PEBBLIFY_TELEGRAM_BOT_TOKEN=123456789:ABCdefGhIJKlmNoPQRstUVwxyZ
+# Uncomment if using S3:
+# PEBBLIFY_S3_SECRET_KEY=your-s3-secret-key
+# AWS_REGION=us-east-1
+```
+
+:::warning
+Never commit `/etc/pebblify/.env` to version control. It contains secrets.
+:::
+
+## Step 5: Enable and start the service
+
+```bash
+# Reload systemd to pick up the new unit file
+sudo systemctl daemon-reload
+
+# Enable the service to start on boot
+sudo systemctl enable pebblify
+
+# Start the service now
+sudo systemctl start pebblify
+```
+
+## Step 6: Verify
+
+```bash
+# Check service status
+sudo systemctl status pebblify
+
+# Follow logs (structured JSON on stderr)
+sudo journalctl -u pebblify -f
+
+# Confirm the API listener is up
+curl -s http://127.0.0.1:2324/v1/status \
+  -u "ignored:${PEBBLIFY_BASIC_AUTH_TOKEN}"
+```
+
+## Stopping and restarting
+
+```bash
+sudo systemctl stop pebblify
+sudo systemctl restart pebblify
+```
+
+On `SIGTERM`, the daemon finishes the job currently in progress, drops any remaining queued jobs (logged at WARN), and exits cleanly within 30 seconds. Jobs that do not complete within 5 minutes of SIGTERM are force-terminated (exit 1).
+
+## systemd unit overview
+
+The unit file (`systemd/pebblify.service`) uses:
+
+```ini
+EnvironmentFile=/etc/pebblify/.env
+ExecStart=/usr/local/bin/pebblify daemon
+Restart=on-failure
+User=pebblify
+```
+
+The daemon reads its configuration from `PEBBLIFY_CONFIG_PATH` (set in `.env`) or defaults to `./config.toml`. When installed via `make install-systemd-daemon`, point `PEBBLIFY_CONFIG_PATH` to `/etc/pebblify/config.toml`:
+
+```ini
+PEBBLIFY_CONFIG_PATH=/etc/pebblify/config.toml
+```

@@ -235,3 +235,4 @@ docker buildx build \
 - Validate Dockerfiles with `hadolint` before committing
 - Test multi-arch builds before pushing to registry
 - No emoji or unicode emulating emoji in container configurations
+- **NEVER** use # hadolint ignore= or # shellcheck disable=. Fix root cause or escalate to CTO.

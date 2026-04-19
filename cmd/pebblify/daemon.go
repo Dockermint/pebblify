@@ -1,0 +1,366 @@
+//go:build linux
+
+// daemon.go: the daemon subcommand is Linux-only. Systemd socket activation,
+// sd_notify readiness signalling, /etc/pebblify configuration paths, and the
+// default known_hosts lookup all assume a Linux host; macOS and Windows
+// operators run the daemon through the container image instead.
+
+package main
+
+import (
+	"context"
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"log/slog"
+	"net/http"
+	"os"
+	"os/signal"
+	"strings"
+	"sync"
+	"syscall"
+	"time"
+
+	"github.com/Dockermint/Pebblify/internal/daemon/api"
+	"github.com/Dockermint/Pebblify/internal/daemon/config"
+	"github.com/Dockermint/Pebblify/internal/daemon/health"
+	"github.com/Dockermint/Pebblify/internal/daemon/notify"
+	"github.com/Dockermint/Pebblify/internal/daemon/queue"
+	"github.com/Dockermint/Pebblify/internal/daemon/runner"
+	"github.com/Dockermint/Pebblify/internal/daemon/store"
+	"github.com/Dockermint/Pebblify/internal/daemon/telemetry"
+)
+
+// daemonShutdownTimeout bounds the graceful drain of each sub-server and the
+// runner's in-flight job on SIGINT or SIGTERM.
+const daemonShutdownTimeout = 30 * time.Second
+
+// daemonCmd is the entrypoint for the `pebblify daemon` subcommand. It parses
+// a minimal flag set (only --version / --help are recognised), loads config
+// and secrets, wires every sub-server, and blocks until a termination signal
+// arrives.
+func daemonCmd(args []string) {
+	fs := flag.NewFlagSet("daemon", flag.ContinueOnError)
+	fs.Usage = func() {
+		if err := daemonUsage(fs.Output()); err != nil {
+			fmt.Fprintf(os.Stderr, "pebblify daemon: write usage: %v\n", err)
+		}
+	}
+	showVersion := fs.Bool("version", false, "print daemon version and exit")
+	fs.BoolVar(showVersion, "V", false, "alias for --version")
+
+	if err := fs.Parse(args); err != nil {
+		os.Exit(2)
+	}
+	if *showVersion {
+		printVersion()
+		return
+	}
+	if fs.NArg() != 0 {
+		fmt.Fprintf(os.Stderr, "pebblify daemon does not accept positional arguments\n\n")
+		if err := daemonUsage(os.Stderr); err != nil {
+			fmt.Fprintf(os.Stderr, "pebblify daemon: write usage: %v\n", err)
+		}
+		os.Exit(1)
+	}
+
+	loaded, err := config.Load("")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "pebblify daemon: load config: %v\n", err)
+		os.Exit(1)
+	}
+
+	logger := newLogger(loaded.Secrets.LogLevel)
+
+	if err := runDaemonLoop(loaded, logger); err != nil {
+		logger.Error("daemon exited with error", "error", err)
+		os.Exit(1)
+	}
+}
+
+// runDaemonLoop wires every sub-server and blocks until the root context is
+// cancelled. It is extracted from daemonCmd so the wiring is testable in
+// isolation without spawning signal handlers.
+func runDaemonLoop(loaded *config.Loaded, logger *slog.Logger) error {
+	cfg := loaded.Config
+
+	rootCtx, cancel := signal.NotifyContext(context.Background(),
+		syscall.SIGINT, syscall.SIGTERM)
+	defer cancel()
+
+	q := queue.New(queue.Options{
+		BufferSize: cfg.Queue.BufferSize,
+		Logger:     logger,
+	})
+
+	notifier, err := notify.New(cfg.Notify, loaded.Secrets)
+	if err != nil {
+		return fmt.Errorf("build notifier: %w", err)
+	}
+
+	targets, err := store.New(rootCtx, cfg.Save, loaded.Secrets, logger)
+	if err != nil {
+		return fmt.Errorf("build store targets: %w", err)
+	}
+
+	telemetryServer, collectors, err := telemetry.New(cfg.Telemetry, logger)
+	if err != nil {
+		return fmt.Errorf("build telemetry: %w", err)
+	}
+
+	r := runner.New(runner.Deps{
+		Cfg:        cfg,
+		Secrets:    loaded.Secrets,
+		Queue:      q,
+		Notifier:   notifier,
+		Targets:    targets,
+		Logger:     logger,
+		HTTPClient: &http.Client{Timeout: 0},
+		Collectors: collectors,
+	})
+
+	apiServer, err := api.New(cfg.API, loaded.Secrets, q, logger, api.Options{
+		Version:    Version,
+		Collectors: collectors,
+	})
+	if err != nil {
+		return fmt.Errorf("build api server: %w", err)
+	}
+
+	healthServer, err := health.New(cfg.Health, newReadinessAdapter(rootCtx, q), logger)
+	if err != nil {
+		return fmt.Errorf("build health server: %w", err)
+	}
+
+	services := DaemonServices{
+		Runner:          r,
+		APIServer:       apiServer,
+		HealthServer:    healthServer,
+		TelemetryServer: telemetryServer,
+	}
+
+	logger.Info("pebblify daemon started",
+		"version", Version,
+		"health_enabled", cfg.Health.Enable,
+		"telemetry_enabled", cfg.Telemetry.Enable,
+		"notify_enabled", cfg.Notify.Enable,
+		"save_targets", len(targets),
+	)
+
+	errCh := startConcurrentServers(rootCtx, logger, services)
+
+	var srvErr error
+	select {
+	case <-rootCtx.Done():
+		logger.Info("shutdown signal received; draining")
+	case err := <-errCh:
+		srvErr = err
+		if err != nil {
+			logger.Error("sub-server exited with error; shutting down", "error", err)
+		} else {
+			logger.Info("sub-server exited cleanly; shutting down")
+		}
+		cancel()
+	}
+
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), daemonShutdownTimeout)
+	defer shutdownCancel()
+
+	drainDaemon(shutdownCtx, logger, q, services)
+	return srvErr
+}
+
+// DaemonServices bundles every long-lived sub-server the daemon orchestrates.
+// Passing a single struct keeps startConcurrentServers and drainDaemon under
+// the CLAUDE.md five-parameter ceiling and eliminates the positional-argument
+// mis-wiring risk that plagued the earlier signature.
+type DaemonServices struct {
+	// Runner executes job pipelines pulled from the queue.
+	Runner runner.Runner
+	// APIServer exposes the v1 HTTP API.
+	APIServer api.Server
+	// HealthServer exposes /healthz and /readyz. Nil when disabled in config.
+	HealthServer health.Server
+	// TelemetryServer exposes /metrics. Nil when telemetry is disabled.
+	TelemetryServer telemetry.Server
+}
+
+// startConcurrentServers launches every sub-server and the runner under their
+// own goroutines, returning a channel that surfaces the first error observed.
+// The channel is buffered so no goroutine blocks when multiple errors surface.
+func startConcurrentServers(ctx context.Context, logger *slog.Logger,
+	services DaemonServices) <-chan error {
+	errCh := make(chan error, 4)
+
+	go func() {
+		if err := services.Runner.Start(ctx); err != nil {
+			logger.Error("runner stopped with error", "error", err)
+			errCh <- err
+			return
+		}
+		errCh <- nil
+	}()
+
+	go func() {
+		if err := services.APIServer.Start(ctx); err != nil {
+			logger.Error("api server exited", "error", err)
+			errCh <- err
+			return
+		}
+		errCh <- nil
+	}()
+
+	if services.HealthServer != nil {
+		go func() {
+			if err := services.HealthServer.Start(ctx); err != nil {
+				logger.Error("health server exited", "error", err)
+				errCh <- err
+				return
+			}
+			errCh <- nil
+		}()
+	}
+	if services.TelemetryServer != nil {
+		go func() {
+			if err := services.TelemetryServer.Start(ctx); err != nil {
+				logger.Error("telemetry server exited", "error", err)
+				errCh <- err
+				return
+			}
+			errCh <- nil
+		}()
+	}
+
+	return errCh
+}
+
+// drainDaemon stops every sub-server and the runner concurrently, bounded by
+// ctx. Individual errors are logged but never aborted on; the daemon must
+// attempt a full drain to leave external systems consistent.
+//
+// http.ErrServerClosed is filtered out of the warning log because every
+// graceful Stop on an http-backed server returns it as part of the normal
+// close dance; surfacing it would spam the operator with a non-actionable
+// warning on every shutdown.
+func drainDaemon(ctx context.Context, logger *slog.Logger, q queue.Queue,
+	services DaemonServices) {
+	if err := q.Shutdown(ctx); err != nil {
+		logger.Warn("queue shutdown error", "error", err)
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if err := services.Runner.Stop(ctx); err != nil && !errors.Is(err, context.Canceled) {
+			logger.Warn("runner stop error", "error", err)
+		}
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if err := services.APIServer.Stop(ctx); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			logger.Warn("api server stop error", "error", err)
+		}
+	}()
+
+	if services.HealthServer != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := services.HealthServer.Stop(ctx); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				logger.Warn("health server stop error", "error", err)
+			}
+		}()
+	}
+	if services.TelemetryServer != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := services.TelemetryServer.Stop(ctx); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				logger.Warn("telemetry server stop error", "error", err)
+			}
+		}()
+	}
+
+	wg.Wait()
+	logger.Info("pebblify daemon stopped")
+}
+
+// newLogger configures slog with the level read from PEBBLIFY_LOG_LEVEL. An
+// unrecognised or empty value defaults to INFO.
+func newLogger(level string) *slog.Logger {
+	var lvl slog.Level
+	switch strings.ToLower(strings.TrimSpace(level)) {
+	case "trace", "debug":
+		lvl = slog.LevelDebug
+	case "", "info":
+		lvl = slog.LevelInfo
+	case "warn", "warning":
+		lvl = slog.LevelWarn
+	case "error":
+		lvl = slog.LevelError
+	default:
+		lvl = slog.LevelInfo
+	}
+	handler := slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: lvl})
+	return slog.New(handler)
+}
+
+// readinessAdapter bridges the queue's shutdown gate to the ReadinessProvider
+// contract consumed by the health package. Ready() reports false once the
+// root context is cancelled so external orchestrators see the daemon go
+// not-ready as soon as SIGTERM arrives, before the queue is fully drained.
+type readinessAdapter struct {
+	ctx context.Context
+	q   queue.Queue
+}
+
+// newReadinessAdapter wires the root context and queue into a ReadinessProvider.
+// The returned adapter reads ctx.Done() on every Ready() call so it reflects
+// shutdown intent without polling.
+func newReadinessAdapter(ctx context.Context, q queue.Queue) *readinessAdapter {
+	return &readinessAdapter{ctx: ctx, q: q}
+}
+
+// Ready implements health.ReadinessProvider. It returns false when either the
+// queue is absent or the root context has fired (daemon is shutting down).
+func (a *readinessAdapter) Ready() bool {
+	if a.q == nil {
+		return false
+	}
+	if a.ctx != nil {
+		select {
+		case <-a.ctx.Done():
+			return false
+		default:
+		}
+	}
+	return true
+}
+
+// daemonUsage prints the subcommand help to w and returns any write error so
+// callers can surface it on the primary error channel instead of silently
+// dropping a broken stderr pipe.
+func daemonUsage(w io.Writer) error {
+	_, err := fmt.Fprintf(w, `pebblify daemon – long-running snapshot conversion service
+
+Usage:
+  pebblify daemon [options]
+
+Options:
+  -V, --version    Show version and exit
+  -h, --help       Show this help
+
+Configuration:
+  All runtime settings are loaded from the TOML config file referenced by
+  PEBBLIFY_CONFIG_PATH (default: ./config.toml). Secrets are read from
+  environment variables only; see docs/specs/daemon-mode.md.
+`)
+	if err != nil {
+		return fmt.Errorf("write daemon usage: %w", err)
+	}
+	return nil
+}

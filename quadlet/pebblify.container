@@ -1,0 +1,31 @@
+[Unit]
+Description=Pebblify daemon (LevelDB to PebbleDB conversion service)
+After=network-online.target
+
+[Container]
+Image=ghcr.io/dockermint/pebblify:v0.4.0
+Exec=daemon
+AutoUpdate=registry
+PublishPort=2323:2323
+PublishPort=2324:2324
+PublishPort=2325:2325
+Volume=%h/.pebblify/config.toml:/etc/pebblify/config.toml:ro,z
+Volume=pebblify-snapshots:/snapshots:z
+Volume=pebblify-tmp:/tmp:z
+EnvironmentFile=%h/.pebblify/.env
+Label=org.opencontainers.image.source=https://github.com/Dockermint/pebblify
+NoNewPrivileges=true
+DropCapability=ALL
+AddCapability=
+ReadOnly=true
+HealthCmd=wget -q --spider http://127.0.0.1:2325/healthz || exit 1
+HealthInterval=30s
+HealthTimeout=5s
+HealthRetries=3
+HealthStartPeriod=10s
+
+[Service]
+Restart=on-failure
+
+[Install]
+WantedBy=default.target
