@@ -319,9 +319,15 @@ func (q *FIFOQueue) Shutdown(ctx context.Context) error {
 // and fragments that may carry secrets are never persisted to logs.
 func (q *FIFOQueue) drainPending() {
 	for job := range q.ch {
-		canonical, _ := Canonicalize(job.URL)
+		canonical, err := Canonicalize(job.URL)
+		if err != nil {
+			q.logger.Warn("queue job had invalid url while draining",
+				"job_id", job.ID, "url", RedactURL(job.URL), "error", err)
+		}
 		q.mu.Lock()
-		delete(q.pending, canonical)
+		if err == nil {
+			delete(q.pending, canonical)
+		}
 		q.mu.Unlock()
 		q.logger.Warn("queue job dropped on shutdown",
 			"job_id", job.ID, "url", RedactURL(job.URL))
