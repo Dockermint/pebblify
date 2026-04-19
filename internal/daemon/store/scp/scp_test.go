@@ -130,7 +130,11 @@ func TestReadAck_CancelledContext(t *testing.T) {
 	cancel()
 	// Use an io.Pipe reader so ReadByte blocks indefinitely, allowing ctx.Done to win.
 	pr, _ := io.Pipe()
-	defer func() { _ = pr.Close() }()
+	defer func() {
+		if err := pr.Close(); err != nil {
+			t.Errorf("close pipe reader: %v", err)
+		}
+	}()
 	r := bufio.NewReader(pr)
 	err := readAck(ctx, r)
 	if !errors.Is(err, context.Canceled) {
@@ -475,7 +479,9 @@ func TestStreamFile_CopiesDataToWriter(t *testing.T) {
 	if err := streamFile(context.Background(), &dst, f); err != nil {
 		t.Fatalf("streamFile() error: %v", err)
 	}
-	_ = f.Close()
+	if err := f.Close(); err != nil {
+		t.Fatalf("close temp file: %v", err)
+	}
 
 	if !bytes.Equal(dst.Bytes(), content) {
 		t.Errorf("streamFile() wrote %q, want %q", dst.Bytes(), content)
@@ -501,7 +507,11 @@ func TestStreamFile_CancelledContextReturnsError(t *testing.T) {
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
 		t.Fatalf("seek: %v", err)
 	}
-	defer func() { _ = f.Close() }()
+	defer func() {
+		if err := f.Close(); err != nil {
+			t.Errorf("close temp file: %v", err)
+		}
+	}()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // pre-cancel so first iteration returns immediately
@@ -518,7 +528,11 @@ func TestStreamFile_EmptyFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create temp: %v", err)
 	}
-	defer func() { _ = f.Close() }()
+	defer func() {
+		if err := f.Close(); err != nil {
+			t.Errorf("close temp file: %v", err)
+		}
+	}()
 
 	var dst bytes.Buffer
 	if err := streamFile(context.Background(), &dst, f); err != nil {

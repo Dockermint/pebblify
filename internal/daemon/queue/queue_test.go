@@ -234,7 +234,10 @@ func TestFIFOQueue_Dequeue_ReturnsEnqueuedJob(t *testing.T) {
 	q := newTestQueue(4)
 	want := Job{ID: "j1", URL: "https://example.com/snap.tar.lz4"}
 	// Canonicalize to match what Enqueue stores.
-	canonical, _ := Canonicalize(want.URL)
+	canonical, err := Canonicalize(want.URL)
+	if err != nil {
+		t.Fatalf("Canonicalize(%q) error: %v", want.URL, err)
+	}
 	want.URL = canonical
 	if err := q.Enqueue(want); err != nil {
 		t.Fatalf("Enqueue() error: %v", err)

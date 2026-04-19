@@ -15,6 +15,7 @@ import (
 	"log/slog"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -88,6 +89,9 @@ type Queue interface {
 	// Shutdown closes the queue to new submissions and blocks until either the
 	// in-flight job completes or ctx is cancelled. Pending (not-yet-started)
 	// jobs are dropped; the returned error is ctx.Err() if the wait times out.
+	// Subsequent calls do not re-close the queue but still wait for any
+	// remaining in-flight work under the new ctx, so callers can supply a
+	// fresh deadline on a second shutdown attempt.
 	Shutdown(ctx context.Context) error
 }
 
@@ -289,11 +293,15 @@ func (q *FIFOQueue) Current() *Job {
 // either been marked current and subsequently completed, or the handoff has
 // been released on a ctx/close path. ctx cancellation during the wait returns
 // ctx.Err() without forcing the in-flight job to stop.
+//
+// Shutdown is idempotent: a second call does not re-close the channel but
+// still waits for any remaining in-flight work under the supplied ctx, so
+// operators can retry with a fresh deadline after a timeout on the first call.
 func (q *FIFOQueue) Shutdown(ctx context.Context) error {
 	q.mu.Lock()
 	if q.closed {
 		q.mu.Unlock()
-		return nil
+		return q.waitForCurrent(ctx)
 	}
 	q.closed = true
 	close(q.ch)
@@ -311,9 +319,15 @@ func (q *FIFOQueue) Shutdown(ctx context.Context) error {
 // and fragments that may carry secrets are never persisted to logs.
 func (q *FIFOQueue) drainPending() {
 	for job := range q.ch {
-		canonical, _ := Canonicalize(job.URL)
+		canonical, err := Canonicalize(job.URL)
+		if err != nil {
+			q.logger.Warn("queue job had invalid url while draining",
+				"job_id", job.ID, "url", RedactURL(job.URL), "error", err)
+		}
 		q.mu.Lock()
-		delete(q.pending, canonical)
+		if err == nil {
+			delete(q.pending, canonical)
+		}
 		q.mu.Unlock()
 		q.logger.Warn("queue job dropped on shutdown",
 			"job_id", job.ID, "url", RedactURL(job.URL))
@@ -394,8 +408,21 @@ func Canonicalize(rawURL string) (string, error) {
 	if _, ok := allowedSchemes[scheme]; !ok {
 		return "", fmt.Errorf("unsupported url scheme %q: only http and https are supported", scheme)
 	}
+	// url.Parse populates u.Host with "host:port" form, so a URL like
+	// "http://:8080" has a non-empty u.Host ":8080" yet an empty hostname. Guard
+	// against that so hostless URLs are rejected here instead of silently
+	// canonicalizing to "http://:8080/".
 	host := strings.ToLower(u.Hostname())
+	if host == "" {
+		return "", errors.New("url must have non-empty host")
+	}
 	port := u.Port()
+	if port != "" {
+		n, err := strconv.Atoi(port)
+		if err != nil || n < 1 || n > 65535 {
+			return "", fmt.Errorf("invalid port %q: must be 1-65535", port)
+		}
+	}
 	if def, ok := defaultSchemePorts[scheme]; ok && port == def {
 		port = ""
 	}

@@ -353,9 +353,18 @@ func runSCPSink(ctx context.Context, session *ssh.Session, localPath string,
 
 	cmd := "scp -t " + shellQuote(remoteDir)
 	if err := session.Start(cmd); err != nil {
-		_ = stdin.Close()
+		// Close session before Wait so stderr reader unblocks: if the remote
+		// command never started, the stderr pipe stays open and io.Copy would
+		// deadlock stderrWG.Wait() forever.
+		startErr := fmt.Errorf("scp sink: start: %w", err)
+		if closeErr := stdin.Close(); closeErr != nil {
+			startErr = fmt.Errorf("%w: close stdin: %v", startErr, closeErr)
+		}
+		if closeErr := session.Close(); closeErr != nil && !errors.Is(closeErr, io.EOF) {
+			startErr = fmt.Errorf("%w: close session: %v", startErr, closeErr)
+		}
 		stderrWG.Wait()
-		return annotateWithStderr(fmt.Errorf("scp sink: start: %w", err), &stderrBuf)
+		return annotateWithStderr(startErr, &stderrBuf)
 	}
 
 	if err := transferFile(ctx, stdin, reader, localPath, info, remoteFile); err != nil {
@@ -363,18 +372,30 @@ func runSCPSink(ctx context.Context, session *ssh.Session, localPath string,
 		// on r.ReadByte from the session's stdout) unblocks. Without this a
 		// wedged peer would leave Wait blocking forever because stdout never
 		// EOFs, re-introducing the daemon-worker hang this teardown prevents.
-		_ = stdin.Close()
-		_ = session.Close()
-		_ = session.Wait()
+		xferErr := err
+		if closeErr := stdin.Close(); closeErr != nil {
+			xferErr = fmt.Errorf("%w: close stdin: %v", xferErr, closeErr)
+		}
+		if closeErr := session.Close(); closeErr != nil && !errors.Is(closeErr, io.EOF) {
+			xferErr = fmt.Errorf("%w: close session: %v", xferErr, closeErr)
+		}
+		if waitErr := session.Wait(); waitErr != nil && !errors.Is(waitErr, io.EOF) {
+			xferErr = fmt.Errorf("%w: wait session: %v", xferErr, waitErr)
+		}
 		stderrWG.Wait()
-		return annotateWithStderr(err, &stderrBuf)
+		return annotateWithStderr(xferErr, &stderrBuf)
 	}
 
 	if err := stdin.Close(); err != nil {
-		_ = session.Close()
-		_ = session.Wait()
+		closeStdinErr := fmt.Errorf("scp sink: close stdin: %w", err)
+		if closeErr := session.Close(); closeErr != nil && !errors.Is(closeErr, io.EOF) {
+			closeStdinErr = fmt.Errorf("%w: close session: %v", closeStdinErr, closeErr)
+		}
+		if waitErr := session.Wait(); waitErr != nil && !errors.Is(waitErr, io.EOF) {
+			closeStdinErr = fmt.Errorf("%w: wait session: %v", closeStdinErr, waitErr)
+		}
 		stderrWG.Wait()
-		return annotateWithStderr(fmt.Errorf("scp sink: close stdin: %w", err), &stderrBuf)
+		return annotateWithStderr(closeStdinErr, &stderrBuf)
 	}
 	waitErr := session.Wait()
 	stderrWG.Wait()
