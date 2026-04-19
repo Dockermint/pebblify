@@ -239,10 +239,21 @@ Every feature **MUST** follow iteration cycle. No skip. **CTO** orchestrate all 
         |                 links to issue from step 5 (Closes #<number>)
         |                 CEO opens the PR manually
         |
+[12b. ISSUE AUDIT] CTO -> @sysadmin verifies issue closure post-merge:
+        |                 - Confirm issue #N closed automatically via `Closes #<number>` link
+        |                 - If issue still open after PR merge: manually close
+        |                 - Closure comment: "Resolved via Closes #<PR_NUMBER>"
+        |                 - Report closure confirmation to CTO
+        |
 [13. CI]          @devops maintains the pipeline. CEO merges ONLY after:
         |                 - CI pipeline is fully green (all checks pass)
         |                 - CodeRabbit has approved (no unresolved comments)
-        |                 If CI fails -> back to step 7 with CI error context
+        |                 If CI fails (1st iteration):
+        |                   - return to step 7 with CI error context
+        |                 If CI fails (2nd+ iteration):
+        |                   - CTO MUST send diagnosis + attempted fixes to @it-consultant
+        |                   - @it-consultant audits root cause + recommends fix strategy
+        |                   - CTO applies recommendations, only THEN delegates @go-developer
         |                 If CodeRabbit raises issues -> fix, commit, resolve
         |
 [14. DOCS]        CTO -> @technical-writer updates documentation post-merge
@@ -264,6 +275,9 @@ Every feature **MUST** follow iteration cycle. No skip. **CTO** orchestrate all 
 - **Step 13 loops** with step 7 till CI pass + CodeRabbit resolved. Fix root cause — never suppress lints, skip tests, add `//nolint` to pass CI. **No agent merge** — only CEO, only once CI + CodeRabbit approved.
 - **1 PR = 1 feature = 1 issue** (strict). PR close exactly one issue via `Closes #<number>`. No bundle unrelated change. `@sysadmin` enforce gate before commit.
 - CodeRabbit comments **MUST** be addressed + marked resolved once fixed.
+  - @sysadmin MUST resolve each CodeRabbit thread via `gh api` or GitHub PR review API.
+  - Each resolution MUST include commit hash reference that fixed the issue.
+  - Silent closure forbidden — full audit trail (API records + commit linkage) mandatory.
 - `@technical-writer` invoked after merge.
 - `@it-consultant` invoked anytime to verify CLAUDE.md compliance + audit agent scope.
 - CEO give small task (bugfix, typo, config), `@software-architect` step reduce to brief assessment, but never fully skip.
