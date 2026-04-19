@@ -396,13 +396,19 @@ func validate(cfg *Config, secrets Secrets) error {
 // non-absolute value at this point is a literal relative path (e.g. "./tmp"
 // or "tmp/work") and is rejected to keep workspace placement predictable.
 func validateConversion(cfg *Config) error {
-	if strings.TrimSpace(cfg.Conversion.TemporaryDirectory) == "" {
+	tmp := cfg.Conversion.TemporaryDirectory
+	if strings.TrimSpace(tmp) == "" {
 		return fmt.Errorf("%w: conversion.temporary_directory must not be empty",
 			ErrInvalidField)
 	}
-	if !filepath.IsAbs(cfg.Conversion.TemporaryDirectory) {
+	if cleaned := filepath.Clean(tmp); cleaned != tmp {
+		return fmt.Errorf(
+			"%w: conversion.temporary_directory must be in canonical form without traversal (got %q, cleaned %q)",
+			ErrInvalidField, tmp, cleaned)
+	}
+	if !filepath.IsAbs(tmp) {
 		return fmt.Errorf("%w: conversion.temporary_directory must be absolute or home-relative (got %q)",
-			ErrInvalidField, cfg.Conversion.TemporaryDirectory)
+			ErrInvalidField, tmp)
 	}
 	return nil
 }

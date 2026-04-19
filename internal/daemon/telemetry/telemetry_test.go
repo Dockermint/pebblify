@@ -40,6 +40,18 @@ func mustRegister(t *testing.T, reg *prometheus.Registry, collectors ...promethe
 	}
 }
 
+// hasMetricLine reports whether body (Prometheus exposition text) contains a
+// line exactly equal to want. Used to avoid false positives from prefix-value
+// collisions like "t_queue_depth_e 50" matching "t_queue_depth_e 5".
+func hasMetricLine(body, want string) bool {
+	for _, line := range strings.Split(body, "\n") {
+		if line == want {
+			return true
+		}
+	}
+	return false
+}
+
 // ---- Collectors helper method tests ----
 
 // TestCollectors_RecordEnqueue_IncrementsEnqueuedAndSetsDepth.
@@ -63,7 +75,7 @@ func TestCollectors_RecordEnqueue_IncrementsEnqueuedAndSetsDepth(t *testing.T) {
 		t.Errorf("RecordEnqueue: missing enqueued label in metrics: %s", body)
 	}
 	const wantDepthLine = "t_queue_depth_e 5"
-	if !strings.Contains(body, wantDepthLine) {
+	if !hasMetricLine(body, wantDepthLine) {
 		t.Errorf("RecordEnqueue: expected metric line %q in body:\n%s", wantDepthLine, body)
 	}
 }
@@ -82,7 +94,7 @@ func TestCollectors_RecordDequeue_UpdatesQueueDepth(t *testing.T) {
 	c.RecordDequeue(3)
 	body := scrapeMetrics(t, reg)
 	const wantLine = "t_queue_depth_d 3"
-	if !strings.Contains(body, wantLine) {
+	if !hasMetricLine(body, wantLine) {
 		t.Errorf("RecordDequeue: expected metric line %q in body:\n%s", wantLine, body)
 	}
 }
@@ -100,7 +112,7 @@ func TestCollectors_RecordJobStart_SetsActiveToOne(t *testing.T) {
 	c.RecordJobStart()
 	body := scrapeMetrics(t, reg)
 	const wantLine = "t_active_s 1"
-	if !strings.Contains(body, wantLine) {
+	if !hasMetricLine(body, wantLine) {
 		t.Errorf("RecordJobStart: expected metric line %q in body:\n%s", wantLine, body)
 	}
 }
@@ -130,7 +142,7 @@ func TestCollectors_RecordJobEnd_Success_SetsCompletedAndClearsActive(t *testing
 		t.Errorf("RecordJobEnd success: missing completed label in: %s", body)
 	}
 	// Active must be reset to 0. Unlabeled gauge is exposed as "t_active_end <value>" (no braces).
-	if !strings.Contains(body, "t_active_end 0") {
+	if !hasMetricLine(body, "t_active_end 0") {
 		t.Errorf("RecordJobEnd: active not reset to 0 after job end: %s", body)
 	}
 }
@@ -176,7 +188,7 @@ func TestCollectors_AddBytesDownloaded_Accumulates(t *testing.T) {
 
 	body := scrapeMetrics(t, reg)
 	const wantLine = "t_bytes_dl 2048"
-	if !strings.Contains(body, wantLine) {
+	if !hasMetricLine(body, wantLine) {
 		t.Errorf("AddBytesDownloaded: expected metric line %q in body:\n%s", wantLine, body)
 	}
 }
@@ -197,7 +209,7 @@ func TestCollectors_AddBytesUploaded_Accumulates(t *testing.T) {
 
 	body := scrapeMetrics(t, reg)
 	const wantLine = "t_bytes_ul 1024"
-	if !strings.Contains(body, wantLine) {
+	if !hasMetricLine(body, wantLine) {
 		t.Errorf("AddBytesUploaded: expected metric line %q in body:\n%s", wantLine, body)
 	}
 }
@@ -234,7 +246,7 @@ func TestCollectors_AddBytesDownloaded_ZeroAndNegativeSkipped(t *testing.T) {
 
 	body := scrapeMetrics(t, reg)
 	// Counter should remain at 0. Unlabeled counter is exposed as "t_bytes_dl_zero <value>" (no braces).
-	if !strings.Contains(body, "t_bytes_dl_zero 0") {
+	if !hasMetricLine(body, "t_bytes_dl_zero 0") {
 		t.Errorf("AddBytesDownloaded zero/negative incremented counter, expected t_bytes_dl_zero 0 in: %s", body)
 	}
 }
@@ -256,7 +268,7 @@ func TestCollectors_AddBytesUploaded_ZeroAndNegativeSkipped(t *testing.T) {
 
 	body := scrapeMetrics(t, reg)
 	const wantLine = "t_bytes_ul_zero 0"
-	if !strings.Contains(body, wantLine) {
+	if !hasMetricLine(body, wantLine) {
 		t.Errorf("AddBytesUploaded zero/negative incremented counter, expected %q in:\n%s", wantLine, body)
 	}
 }
