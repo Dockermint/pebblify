@@ -13,7 +13,7 @@
 
 **Pebblify** is a high-performance migration tool that converts LevelDB databases to PebbleDB format, specifically designed for Cosmos SDK and CometBFT blockchain nodes.
 
-PebbleDB offers significant performance improvements over LevelDB, including better write throughput, more efficient compaction, and reduced storage overhead. Pebblify outperforms existing tools: in a real-world production benchmark it completed a full snapshot conversion in **6m48** versus 7m13 for Level2Pebble, while producing a **20.34 GiB** output compared to 26 GiB, with no data loss. It adds crash recovery, disk space checks, verification, Prometheus metrics, health probes, notifications, and daemon mode that Level2Pebble does not provide.
+PebbleDB offers significant performance improvements over LevelDB, including better write throughput, more efficient compaction, and reduced storage overhead. Pebblify outperforms existing tool, with no data loss (see [Benchmark](#Benchmark)). It adds crash recovery, disk space checks, verification, Prometheus metrics, health probes, notifications, and daemon mode that Level2Pebble does not provide.
 
 **[Install now](#installation)** or read the [full documentation](https://docs.dockermint.io/pebblify/).
 
