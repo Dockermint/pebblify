@@ -6,11 +6,9 @@
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Website](https://img.shields.io/badge/website-dockermint.io-informational)](https://dockermint.io/tools)
-[![Documentation](https://img.shields.io/badge/docs-docs.dockermint.io-blue)](https://docs.dockermint.io/pebblify/)
 [![Go MSRV](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go&logoColor=white)](https://go.dev/doc/install)
 [![Latest Release](https://img.shields.io/github/v/release/Dockermint/pebblify?label=release)](https://github.com/Dockermint/pebblify/releases)
 [![CI](https://github.com/Dockermint/pebblify/actions/workflows/ci.yml/badge.svg)](https://github.com/Dockermint/pebblify/actions/workflows/ci.yml)
-[![Release](https://github.com/Dockermint/pebblify/actions/workflows/release.yml/badge.svg)](https://github.com/Dockermint/pebblify/actions/workflows/release.yml)
 [![Container](https://img.shields.io/badge/container-ghcr.io-blue?logo=github)](https://github.com/orgs/Dockermint/packages/container/package/pebblify)
 
 **Pebblify** is a high-performance migration tool that converts LevelDB databases to PebbleDB format, specifically designed for Cosmos SDK and CometBFT blockchain nodes.
