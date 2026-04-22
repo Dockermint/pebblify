@@ -1,0 +1,74 @@
+name: Documentation
+description: Report missing, incorrect, or outdated documentation.
+title: "docs(scope): "
+labels:
+  - documentation
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Documentation is owned by `@technical-writer` ([CLAUDE.md](../CLAUDE.md)).
+        Architecture specs (`docs/specs/`) are owned by `@software-architect`.
+        Please identify the correct owner in the form below.
+
+  - type: input
+    id: area
+    attributes:
+      label: Document / area affected
+      description: >
+        Which file or section needs attention?
+        (e.g. `README.md`, `docs/specs/converter.md`, CLI `--help` output,
+        inline Go doc comments)
+      placeholder: "e.g. README.md / Quick-start section"
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Issue description
+      description: >
+        Describe what is wrong, missing, or unclear. Quote the current text
+        if applicable and describe what it should say.
+      placeholder: |
+        Current: "Run pebblify migrate ..."
+        Problem: The subcommand is `level-to-pebble`, not `migrate`.
+        Expected: "Run pebblify level-to-pebble ..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: rationale
+    attributes:
+      label: Why this matters
+      description: >
+        Who is affected and what is the impact of the documentation gap?
+      placeholder: |
+        Node operators following the quick-start guide will encounter an
+        "unknown command" error on their first run.
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: >
+        What must be true for this issue to be resolved?
+      placeholder: |
+        - [ ] Incorrect text corrected or missing section added
+        - [ ] No broken links remain in the updated document
+        - [ ] Reviewed and merged by @technical-writer
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: compliance
+    attributes:
+      label: CLAUDE.md compliance
+      options:
+        - label: I have read CLAUDE.md and this issue follows the project workflow.
+          required: true
+        - label: >
+            I am not requesting changes to Go source files — only documentation.
+          required: true

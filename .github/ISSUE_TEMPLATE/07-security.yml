@@ -1,0 +1,86 @@
+name: Security issue (non-sensitive)
+description: >
+  Track a non-sensitive security improvement (hardening, dependency audit,
+  SBOM). For actual vulnerabilities use GitHub Security Advisories (private).
+title: "fix(security): "
+labels:
+  - security
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **STOP — is this a vulnerability?**
+
+        If you are reporting an exploitable vulnerability, do **NOT** use this
+        public template. Instead, file a private
+        [Security Advisory](https://github.com/Dockermint/pebblify/security/advisories/new).
+
+        This template is for non-sensitive security improvements only
+        (e.g. dependency hardening, CI secret hygiene, SBOM gaps).
+
+  - type: input
+    id: area
+    attributes:
+      label: Affected area
+      description: >
+        Which component, dependency, or process is affected?
+        (e.g. `go.mod` / `github.com/syndtr/goleveldb`, CI secrets handling,
+        SLSA provenance)
+      placeholder: "e.g. go.mod / goleveldb dependency"
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Issue description
+      description: >
+        Describe the security concern. For a known CVE, include the CVE ID.
+        For dependency issues, include the output of `govulncheck ./...`.
+      placeholder: |
+        `govulncheck` reports GO-XXXX-XXXX in dependency X at version Y.
+        Upgrading to version Z resolves the finding.
+    validations:
+      required: true
+
+  - type: textarea
+    id: cvss
+    attributes:
+      label: Severity / CVSS (if applicable)
+      description: |
+        Provide CVSS score or qualitative severity if known.
+        Leave blank for hardening tasks with no associated CVE.
+      placeholder: |
+        CVSS 3.1 Base Score: 7.5 (High)
+        Vector: AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H
+    validations:
+      required: false
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: >
+        What must be true for this issue to be resolved?
+      placeholder: |
+        - [ ] `govulncheck ./...` reports zero vulnerabilities after fix
+        - [ ] Dependency updated in `go.mod` / `go.sum` by @lead-dev
+        - [ ] CI pipeline verifies fix on all four build targets
+        - [ ] No secrets introduced in workflow files
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: compliance
+    attributes:
+      label: CLAUDE.md compliance
+      options:
+        - label: I have read CLAUDE.md and this issue follows the project workflow.
+          required: true
+        - label: >
+            I confirm this is NOT an exploitable vulnerability — those must be
+            reported via GitHub Security Advisories.
+          required: true
+        - label: >
+            No secret, token, or credential is included anywhere in this issue.
+          required: true

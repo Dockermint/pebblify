@@ -1,0 +1,83 @@
+name: CI/CD workflow change
+description: Propose or report an issue with GitHub Actions pipelines or CI/CD configuration.
+title: "ci(scope): "
+labels:
+  - workflow
+body:
+  - type: markdown
+    attributes:
+      value: |
+        CI/CD changes are owned by `@devops` ([CLAUDE.md](../CLAUDE.md)).
+        All pipeline steps mandated by CLAUDE.md must remain in the pipeline —
+        never add `continue-on-error: true` or `|| true` to suppress failures.
+
+  - type: input
+    id: area
+    attributes:
+      label: Affected workflow / job
+      description: >
+        Which workflow file or job is affected?
+        (e.g. `.github/workflows/ci.yml` / `lint` job, build matrix)
+      placeholder: "e.g. .github/workflows/ci.yml / build-matrix"
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Change description
+      description: >
+        Describe the proposed change or the problem observed in the pipeline.
+        For failures, include the full job log URL or relevant log excerpt.
+      placeholder: |
+        The `govulncheck` job fails because ...
+        Proposed fix: ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: rationale
+    attributes:
+      label: Rationale
+      description: |
+        Why is this change needed? Include:
+        - Impact on CI correctness, speed, or cost
+        - Which CLAUDE.md-mandated checks are affected (if any)
+        - Whether any new third-party action is introduced (include SHA pin)
+      placeholder: |
+        Current setup causes 12-minute runs on every PR.
+        Parallelising lint and vet jobs reduces this to ~6 minutes without
+        dropping any mandatory check.
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: >
+        What must be true for this issue to be resolved?
+      placeholder: |
+        - [ ] All CLAUDE.md-mandated CI steps still present and not optional
+        - [ ] No `continue-on-error: true` added
+        - [ ] All action versions pinned to @vX.Y.Z or SHA
+        - [ ] Pipeline passes on all four build targets
+        - [ ] No secrets hardcoded in workflow files
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: compliance
+    attributes:
+      label: CLAUDE.md compliance
+      options:
+        - label: I have read CLAUDE.md and this issue follows the project workflow.
+          required: true
+        - label: >
+            This change does not remove, skip, or make optional any
+            CLAUDE.md-mandated CI step.
+          required: true
+        - label: >
+            Any new third-party action has been audited and will be pinned
+            to a specific version or SHA.
+          required: true

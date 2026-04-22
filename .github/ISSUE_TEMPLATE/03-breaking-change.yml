@@ -1,0 +1,80 @@
+name: Breaking change
+description: Propose or document a breaking change to Pebblify's CLI, config, or data format.
+title: "feat(scope)!: "
+labels:
+  - breaking-change
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Breaking changes require a CEO-confirmed architecture spec
+        ([CLAUDE.md step 4](../CLAUDE.md)) and explicit migration guidance.
+        Do not open this issue until the spec is confirmed.
+
+  - type: input
+    id: area
+    attributes:
+      label: Affected area
+      description: >
+        Which subcommand, flag, config key, or data format is changing?
+        (e.g. `level-to-pebble --batch-size` flag, checkpoint file format)
+      placeholder: "e.g. level-to-pebble / --workers flag signature"
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Change description
+      description: >
+        Describe what is changing and why the change is incompatible with
+        current behaviour. Be explicit about the old contract vs. the new one.
+      placeholder: "Old behaviour: ...\nNew behaviour: ..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: migration
+    attributes:
+      label: Migration path
+      description: |
+        Explain exactly how existing users migrate:
+        - What they must change (flags, config files, checkpoint data, scripts)
+        - Whether a compatibility shim or deprecation period is provided
+        - Any tooling (`pebblify recover --migrate`) to assist
+      placeholder: |
+        Users must replace `--old-flag` with `--new-flag`.
+        A one-time data migration is required: run `pebblify recover --migrate`.
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: >
+        What must be true for this breaking change to be considered complete?
+      placeholder: |
+        - [ ] Old behaviour removed / replaced in all four build targets
+        - [ ] Migration path documented in `docs/`
+        - [ ] CHANGELOG entry added with `BREAKING CHANGE:` footer
+        - [ ] All tests updated; `go test ./...` passes
+        - [ ] golangci-lint reports zero issues
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: compliance
+    attributes:
+      label: CLAUDE.md compliance
+      options:
+        - label: I have read CLAUDE.md and this issue follows the project workflow.
+          required: true
+        - label: >
+            An architecture spec has been confirmed by the CEO before this
+            issue was opened.
+          required: true
+        - label: >
+            A migration path is documented above and will be added to `docs/`
+            before merge.
+          required: true

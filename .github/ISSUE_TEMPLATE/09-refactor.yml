@@ -1,0 +1,91 @@
+name: Refactor
+description: Propose an internal code refactor that does not change external behaviour.
+title: "refactor(scope): "
+labels:
+  - refactor
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Refactors must not change observable CLI behaviour or public API.
+        They still require a CEO-confirmed architecture spec
+        ([CLAUDE.md step 4](../CLAUDE.md)) if they cross package boundaries
+        or alter interfaces. All CLAUDE.md quality gates apply.
+
+  - type: input
+    id: area
+    attributes:
+      label: Affected package / area
+      description: >
+        Which internal package or file is being refactored?
+        (e.g. `internal/converter`, `internal/progress`, `cmd/root.go`)
+      placeholder: "e.g. internal/converter"
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Refactor description
+      description: >
+        Describe what is being restructured and how. Be explicit about what
+        changes structurally (function signatures, interfaces, package layout)
+        versus what stays the same (observable behaviour).
+      placeholder: |
+        Extract the batch-writing logic from `converter.Convert()` into a
+        dedicated `batchWriter` type with a `Write(batch []kv.Pair) error`
+        interface, enabling independent unit testing.
+    validations:
+      required: true
+
+  - type: textarea
+    id: rationale
+    attributes:
+      label: Rationale
+      description: |
+        Why is this refactor worth doing? Include:
+        - Specific code smell or modularity gap it fixes
+        - Impact on testability, readability, or future extensibility
+        - Reference to `@lead-dev` modularity audit finding (if applicable)
+      placeholder: |
+        `converter.Convert()` is 300 lines with 7 parameters, violating the
+        5-param rule in CLAUDE.md. Extracting `batchWriter` reduces it to
+        ~120 lines and enables targeted mutation testing.
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: >
+        What must be true for this refactor to be considered complete?
+      placeholder: |
+        - [ ] No observable CLI behaviour changes
+        - [ ] `go test ./...` passes with no test modifications required
+        - [ ] golangci-lint reports zero issues
+        - [ ] `@lead-dev` modularity audit passes
+        - [ ] `@reviewer` issues APPROVE verdict
+        - [ ] Mutation testing coverage not reduced
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: compliance
+    attributes:
+      label: CLAUDE.md compliance
+      options:
+        - label: I have read CLAUDE.md and this issue follows the project workflow.
+          required: true
+        - label: >
+            This refactor does not add `//nolint` directives or suppress any
+            linter warning.
+          required: true
+        - label: >
+            Observable CLI behaviour (flags, subcommands, output format,
+            exit codes) is unchanged.
+          required: true
+        - label: >
+            If this refactor crosses package boundaries or alters interfaces,
+            a CEO-confirmed architecture spec exists or will be created first.
+          required: true

@@ -1,0 +1,84 @@
+name: Dependency change
+description: Request adding, updating, or removing a Go module dependency.
+title: "deps(scope): "
+labels:
+  - dependency
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Dependency changes are owned by `@lead-dev` ([CLAUDE.md](../CLAUDE.md)).
+        All new dependencies must be evaluated for security and licence
+        compatibility before being added to `go.mod`. `govulncheck` must pass
+        after any change.
+
+  - type: input
+    id: area
+    attributes:
+      label: Dependency / module path
+      description: >
+        Which Go module is being added, updated, or removed?
+        (e.g. `github.com/cockroachdb/pebble`, `github.com/syndtr/goleveldb`)
+      placeholder: "e.g. github.com/cockroachdb/pebble"
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Change description
+      description: |
+        Describe the change:
+        - Add / update / remove
+        - Current version (if applicable) → proposed version
+        - Which internal package(s) will consume it
+      placeholder: |
+        Update github.com/cockroachdb/pebble from v1.1.0 to v1.1.2.
+        Consumed by `internal/converter`.
+    validations:
+      required: true
+
+  - type: textarea
+    id: rationale
+    attributes:
+      label: Rationale
+      description: |
+        Why is this dependency change necessary? Include:
+        - Bug fix, security patch, or new API needed
+        - Output of `govulncheck ./...` before and after (if security-related)
+        - Licence of the new/updated package (must be compatible with project licence)
+      placeholder: |
+        v1.1.2 fixes a data-corruption bug in the batch writer (upstream issue #XXXX).
+        Licence: BSD-3-Clause (compatible). `govulncheck` clean after update.
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: >
+        What must be true for this issue to be resolved?
+      placeholder: |
+        - [ ] `go.mod` and `go.sum` updated by @lead-dev
+        - [ ] `govulncheck ./...` passes with zero findings
+        - [ ] `go build ./cmd/... ./internal/...` succeeds on all four targets
+        - [ ] `go test ./...` passes
+        - [ ] golangci-lint reports zero issues
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: compliance
+    attributes:
+      label: CLAUDE.md compliance
+      options:
+        - label: I have read CLAUDE.md and this issue follows the project workflow.
+          required: true
+        - label: >
+            I understand that only `@lead-dev` may modify `go.mod` / `go.sum`.
+          required: true
+        - label: >
+            The licence of the dependency has been verified as compatible with
+            the project licence.
+          required: true

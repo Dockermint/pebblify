@@ -6,16 +6,14 @@
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Website](https://img.shields.io/badge/website-dockermint.io-informational)](https://dockermint.io/tools)
-[![Documentation](https://img.shields.io/badge/docs-docs.dockermint.io-blue)](https://docs.dockermint.io/pebblify/)
 [![Go MSRV](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go&logoColor=white)](https://go.dev/doc/install)
 [![Latest Release](https://img.shields.io/github/v/release/Dockermint/pebblify?label=release)](https://github.com/Dockermint/pebblify/releases)
 [![CI](https://github.com/Dockermint/pebblify/actions/workflows/ci.yml/badge.svg)](https://github.com/Dockermint/pebblify/actions/workflows/ci.yml)
-[![Release](https://github.com/Dockermint/pebblify/actions/workflows/release.yml/badge.svg)](https://github.com/Dockermint/pebblify/actions/workflows/release.yml)
 [![Container](https://img.shields.io/badge/container-ghcr.io-blue?logo=github)](https://github.com/orgs/Dockermint/packages/container/package/pebblify)
 
 **Pebblify** is a high-performance migration tool that converts LevelDB databases to PebbleDB format, specifically designed for Cosmos SDK and CometBFT blockchain nodes.
 
-PebbleDB offers significant performance improvements over LevelDB, including better write throughput, more efficient compaction, and reduced storage overhead. Pebblify outperforms existing tools: in a real-world production benchmark it completed a full snapshot conversion in **6m48** versus 7m13 for Level2Pebble, while producing a **20.34 GiB** output compared to 26 GiB, with no data loss. It adds crash recovery, disk space checks, verification, Prometheus metrics, health probes, notifications, and daemon mode that Level2Pebble does not provide.
+PebbleDB offers significant performance improvements over LevelDB, including better write throughput, more efficient compaction, and reduced storage overhead. Pebblify outperforms existing tool, with no data loss (see [Benchmark](#Benchmark)). It adds crash recovery, disk space checks, verification, Prometheus metrics, health probes, notifications, and daemon mode that Level2Pebble does not provide.
 
 **[Install now](#installation)** or read the [full documentation](https://docs.dockermint.io/pebblify/).
 
