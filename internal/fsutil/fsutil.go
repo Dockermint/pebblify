@@ -10,11 +10,15 @@ import (
 	"syscall"
 )
 
+// PathExists reports whether p resolves to an existing filesystem entry.
+// A stat error of any kind is reported as non-existence.
 func PathExists(p string) bool {
 	_, err := os.Stat(p)
 	return err == nil
 }
 
+// IsDirEmpty reports whether the directory at p contains no entries.
+// It returns an error if p cannot be opened or read.
 func IsDirEmpty(p string) (bool, error) {
 	f, err := os.Open(p)
 	if err != nil {
@@ -32,6 +36,8 @@ func IsDirEmpty(p string) (bool, error) {
 	return false, nil
 }
 
+// CopyFile copies the regular file at src to dst, creating parent
+// directories as needed and fsyncing the destination before returning.
 func CopyFile(src, dst string) error {
 	in, err := os.Open(src)
 	if err != nil {
@@ -56,6 +62,9 @@ func CopyFile(src, dst string) error {
 	return out.Sync()
 }
 
+// CopyDir recursively copies the directory tree rooted at src into dst.
+// Files are copied through CopyFile and sub-directories are created with
+// 0o755 permissions.
 func CopyDir(src, dst string) error {
 	entries, err := os.ReadDir(src)
 	if err != nil {
@@ -84,6 +93,8 @@ func CopyDir(src, dst string) error {
 	return nil
 }
 
+// MoveDir renames src to dst, falling back to a recursive copy followed
+// by removal when the two paths span different filesystems (EXDEV).
 func MoveDir(src, dst string) error {
 	if err := os.Rename(src, dst); err != nil {
 		var linkErr *os.LinkError
@@ -101,6 +112,8 @@ func MoveDir(src, dst string) error {
 	return nil
 }
 
+// DirSize returns the total size in bytes of every regular file under
+// root. Symlinks and non-regular entries are ignored.
 func DirSize(root string) (int64, error) {
 	var size int64
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
@@ -119,6 +132,8 @@ func DirSize(root string) (int64, error) {
 	return size, err
 }
 
+// FormatBytes renders n as a human-readable size using binary (KiB, MiB,
+// GiB, TiB) units with two decimals of precision.
 func FormatBytes(n int64) string {
 	const (
 		kb = 1024
@@ -143,6 +158,9 @@ func FormatBytes(n int64) string {
 	}
 }
 
+// GetAvailableSpace returns the number of bytes available to unprivileged
+// users on the filesystem backing path. When path does not exist the
+// closest existing ancestor is probed instead.
 func GetAvailableSpace(path string) (uint64, error) {
 	var stat syscall.Statfs_t
 	checkPath := path
@@ -159,6 +177,10 @@ func GetAvailableSpace(path string) (uint64, error) {
 	return stat.Bavail * uint64(stat.Bsize), nil
 }
 
+// CheckDiskSpace warns on stderr when tmpDir has less free space than
+// 1.5x srcSize, the rule-of-thumb headroom required during migration.
+// When verbose is true and the check passes, the figures are printed on
+// stdout for operator visibility.
 func CheckDiskSpace(tmpDir string, srcSize int64, verbose bool) {
 	available, err := GetAvailableSpace(tmpDir)
 	if err != nil {
@@ -179,6 +201,9 @@ func CheckDiskSpace(tmpDir string, srcSize int64, verbose bool) {
 	}
 }
 
+// NormalizeWorkers clamps workers to a sensible range for numJobs. A zero
+// or negative value defaults to runtime.NumCPU; the result is capped at
+// numJobs and floored at one.
 func NormalizeWorkers(workers int, numJobs int) int {
 	if workers <= 0 {
 		workers = runtime.NumCPU()

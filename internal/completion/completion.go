@@ -7,6 +7,7 @@ import (
 	"strings"
 )
 
+// GenerateBash returns the bash completion script for the pebblify CLI.
 func GenerateBash() string {
 	return `_pebblify() {
     local cur prev commands
@@ -91,6 +92,7 @@ complete -F _pebblify pebblify
 `
 }
 
+// GenerateZsh returns the zsh completion script for the pebblify CLI.
 func GenerateZsh() string {
 	return `#compdef pebblify
 
@@ -158,6 +160,8 @@ _pebblify "$@"
 `
 }
 
+// InstallBash writes the bash completion script under the user's
+// ~/.bash_completion.d directory and returns the destination path.
 func InstallBash() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -177,6 +181,9 @@ func InstallBash() (string, error) {
 	return dest, nil
 }
 
+// InstallZsh writes the zsh completion script under the first usable
+// directory found on FPATH or under the user's ~/.zsh/completions fallback
+// and returns the destination path.
 func InstallZsh() (string, error) {
 	dir := zshCompletionDir()
 
