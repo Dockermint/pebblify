@@ -59,6 +59,7 @@ jobs:
     permissions:
       id-token: write
       attestations: write
+      artifact-metadata: write
       contents: read
     steps:
       - uses: actions/download-artifact@v8
@@ -67,8 +68,8 @@ jobs:
           pattern: pebblify-*
           merge-multiple: true
 
-      - name: Attest build provenance
-        uses: actions/attest-build-provenance@v4
+      - name: Attest binary provenance
+        uses: actions/attest@v4
         with:
           subject-path: artifacts/pebblify-*
 
@@ -79,8 +80,8 @@ jobs:
           format: spdx-json
           output-file: sbom.spdx.json
 
-      - name: Attest SBOM
-        uses: actions/attest-sbom@v4
+      - name: Attest binary SBOM
+        uses: actions/attest@v4
         with:
           subject-path: artifacts/pebblify-*
           sbom-path: sbom.spdx.json
@@ -91,6 +92,7 @@ jobs:
     permissions:
       packages: write
       attestations: write
+      artifact-metadata: write
       id-token: write
       contents: read
     steps:
@@ -148,7 +150,7 @@ jobs:
           annotations: ${{ steps.meta.outputs.annotations }}
 
       - name: Attest Docker image provenance
-        uses: actions/attest-build-provenance@v4
+        uses: actions/attest@v4
         with:
           subject-name: ghcr.io/${{ steps.repo.outputs.name }}
           subject-digest: ${{ steps.push.outputs.digest }}
