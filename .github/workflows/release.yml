@@ -121,6 +121,7 @@ jobs:
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
           labels: |
             org.opencontainers.image.title=Pebblify
             org.opencontainers.image.description=LevelDB to PebbleDB migration tool for Cosmos/CometBFT nodes.
@@ -152,6 +153,13 @@ jobs:
           subject-name: ghcr.io/${{ steps.repo.outputs.name }}
           subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true
+
+      - name: Re-tag latest after attestation (surface semver first in GHCR UI)
+        if: ${{ !contains(github.ref_name, '-') }}
+        run: |
+          docker buildx imagetools create \
+            --tag ghcr.io/${{ steps.repo.outputs.name }}:latest \
+            ghcr.io/${{ steps.repo.outputs.name }}@${{ steps.push.outputs.digest }}
 
   release:
     name: GitHub Release
