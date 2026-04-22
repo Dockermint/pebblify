@@ -7,7 +7,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        New features follow the full [CLAUDE.md development workflow](../CLAUDE.md)
+        New features follow the full [CLAUDE.md development workflow](../../CLAUDE.md)
         (steps 1-20). An architecture spec from `@software-architect` is required
         before implementation begins. Fill in every required field.
 
@@ -69,9 +69,7 @@ body:
       options:
         - label: I have read CLAUDE.md and this request follows the project workflow.
           required: true
-        - label: >
-            This feature does not require modifying `go.mod` without
-            `@lead-dev` approval.
+        - label: Modifying `go.mod` requires `@lead-dev` approval.
           required: true
         - label: >
             I understand an architecture spec must be confirmed by the CEO
