@@ -41,7 +41,6 @@ LABEL org.opencontainers.image.title="Pebblify" \
       org.opencontainers.image.description="LevelDB to PebbleDB migration tool and long-running daemon for Cosmos/CometBFT nodes (CLI + daemon modes)." \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.revision="${REVISION}" \
-      org.opencontainers.image.source="https://github.com/Dockermint/Pebblify" \
       org.opencontainers.image.url="https://www.dockermint.io" \
       org.opencontainers.image.documentation="https://docs.dockermint.io/pebblify/" \
       org.opencontainers.image.licenses="Apache-2.0" \
