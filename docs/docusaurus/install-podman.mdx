@@ -146,7 +146,7 @@ EnvironmentFile=%h/.pebblify/.env
 systemctl --user stop pebblify
 
 # Update image and restart
-podman pull ghcr.io/dockermint/pebblify:v0.5.0
+podman pull ghcr.io/dockermint/pebblify:v0.4.0
 # Edit the Quadlet file to update the Image= tag
 systemctl --user daemon-reload
 systemctl --user start pebblify
