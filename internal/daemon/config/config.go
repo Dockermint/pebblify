@@ -19,7 +19,8 @@ import (
 // SupportedConfigVersion is the maximum config_version this loader understands.
 const SupportedConfigVersion = 0
 
-// Default queue buffer size when the [queue] section or its size field is absent.
+// DefaultQueueBufferSize is the queue channel capacity used when the
+// [queue] section or its size field is absent from the daemon config.
 const DefaultQueueBufferSize = 64
 
 // Compression codec identifiers accepted by the save.compression field.

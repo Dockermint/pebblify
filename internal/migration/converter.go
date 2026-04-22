@@ -22,6 +22,9 @@ import (
 	"github.com/Dockermint/Pebblify/internal/state"
 )
 
+// RunConfig bundles the tunables for a LevelDB to PebbleDB conversion
+// run. Zero values for Workers or BatchMemory trigger the pipeline's
+// defaults.
 type RunConfig struct {
 	Workers        int
 	BatchMemory    int
@@ -29,6 +32,11 @@ type RunConfig struct {
 	MetricsEnabled bool
 }
 
+// RunLevelToPebble performs a fresh conversion from the LevelDB tree at
+// src into a new PebbleDB tree under out, using tmpRoot as the working
+// directory for checkpoints and staged output. It returns an error if the
+// source is missing, the output already contains a data directory, or any
+// sub-database conversion fails.
 func RunLevelToPebble(src, out string, cfg *RunConfig, tmpRoot string) error {
 	statePath := filepath.Join(tmpRoot, state.StateFileName)
 	tmpData := filepath.Join(tmpRoot, "data")
@@ -175,6 +183,10 @@ func RunLevelToPebble(src, out string, cfg *RunConfig, tmpRoot string) error {
 	return nil
 }
 
+// RunRecover resumes an interrupted conversion by reading the state file
+// under tmpRoot and re-running the pipeline on every database that is not
+// yet marked done. Each resumed database restarts from its last on-disk
+// checkpoint key.
 func RunRecover(workers, batchMemory int, tmpRoot string, verbose bool, metricsEnabled bool) error {
 	statePath := filepath.Join(tmpRoot, state.StateFileName)
 

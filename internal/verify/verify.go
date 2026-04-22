@@ -16,12 +16,17 @@ import (
 	"github.com/Dockermint/Pebblify/internal/fsutil"
 )
 
+// Config tunes a verification run. SamplePercent is the percentage of
+// keys from each source database to compare (0 or values >= 100 mean
+// every key). StopOnError aborts on the first mismatch, and Verbose
+// enables per-key logging.
 type Config struct {
 	SamplePercent float64
 	StopOnError   bool
 	Verbose       bool
 }
 
+// Result summarises the outcome of verifying a single database.
 type Result struct {
 	DBName         string
 	TotalKeys      int64
@@ -42,6 +47,10 @@ func truncateBytes(b []byte, maxLen int) []byte {
 	return b[:maxLen]
 }
 
+// VerifyDB compares the LevelDB at srcPath against the PebbleDB at
+// dstPath according to config and returns a Result. When the sample
+// covers every key, the destination is additionally scanned so extra keys
+// missing from the source are surfaced as mismatches.
 func VerifyDB(srcPath, dstPath string, config *Config) (*Result, error) {
 	result := &Result{
 		DBName:  filepath.Base(srcPath),
@@ -157,6 +166,10 @@ func VerifyDB(srcPath, dstPath string, config *Config) (*Result, error) {
 	return result, nil
 }
 
+// Run iterates over every .db sub-directory under srcDir, calls VerifyDB
+// for each matching destination under dstDir, prints a human-readable
+// summary, and returns a non-nil error when any database failed
+// verification.
 func Run(srcDir, dstDir string, config *Config) error {
 	fmt.Printf("Starting verification...\n")
 	fmt.Printf("  Source:      %s\n", srcDir)
