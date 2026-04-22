@@ -1,0 +1,79 @@
+name: Feature request
+description: Propose a new feature or capability for Pebblify.
+title: "feat(scope): "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        New features follow the full [CLAUDE.md development workflow](../CLAUDE.md)
+        (steps 1-20). An architecture spec from `@software-architect` is required
+        before implementation begins. Fill in every required field.
+
+  - type: input
+    id: area
+    attributes:
+      label: Feature area / package
+      description: >
+        Which subcommand or internal package would this feature touch?
+        (e.g. `converter`, `recovery`, `verify`, `progress`, `config`, new CLI flag)
+      placeholder: "e.g. converter / adaptive-batching"
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Feature description
+      description: >
+        A clear and concise description of the proposed feature.
+        What should Pebblify do that it does not do today?
+      placeholder: "Describe the feature."
+    validations:
+      required: true
+
+  - type: textarea
+    id: rationale
+    attributes:
+      label: Rationale / business value
+      description: |
+        Why is this feature needed? Include:
+        - Use-case or user story
+        - Impact on migration performance, reliability, or usability
+        - Any relevant Cosmos SDK / CometBFT context
+      placeholder: |
+        As a node operator, I need X so that Y...
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: >
+        What must be true for this feature to be considered done?
+      placeholder: |
+        - [ ] Feature implemented in the correct internal package
+        - [ ] Unit tests written by @qa (`go test ./...` passes)
+        - [ ] golangci-lint reports zero issues
+        - [ ] All four build targets compile successfully
+        - [ ] Documentation updated (if user-facing)
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: compliance
+    attributes:
+      label: CLAUDE.md compliance
+      options:
+        - label: I have read CLAUDE.md and this request follows the project workflow.
+          required: true
+        - label: >
+            This feature does not require modifying `go.mod` without
+            `@lead-dev` approval.
+          required: true
+        - label: >
+            I understand an architecture spec must be confirmed by the CEO
+            before implementation starts (CLAUDE.md step 4).
+          required: true
