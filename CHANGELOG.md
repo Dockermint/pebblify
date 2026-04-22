@@ -1,5 +1,28 @@
 # Changelog
 
+## [v0.4.1](https://github.com/Dockermint/Pebblify/compare/v0.4.0...v0.4.1)
+
+### Bug Fixes
+
+- fix(docs): correct install-podman image tag from v0.5.0 to v0.4.0; rename `LICENCE` to `LICENSE` for Apache-2.0 / GitHub license-detection compliance ([#65](https://github.com/Dockermint/Pebblify/pull/65))
+- fix(ci): surface semver/`latest` tag before Sigstore attestation digest in the GHCR package-page tag list via post-attestation `imagetools create` re-tag, guarded against pre-releases ([#67](https://github.com/Dockermint/Pebblify/pull/67))
+- fix(container): remove hardcoded `org.opencontainers.image.source` LABEL from Dockerfile (was capital-P URL breaking GHCR case-sensitive repo-link heuristic); metadata-action is now sole source of truth ([#67](https://github.com/Dockermint/Pebblify/pull/67))
+
+### Documentation
+
+- docs(go-doc): add godoc comments on ~76 exported identifiers across `cmd/pebblify` and 13 `internal/` packages; add package-level synopses via `doc.go` convention ([#63](https://github.com/Dockermint/Pebblify/pull/63))
+- docs(arch): land v0.4.1 architecture specs (`godoc-coverage`, `docs-freshness-v0.4.1`, `ghcr-package-display-fix`) and ROADMAP v0.4.1 section ([#61](https://github.com/Dockermint/Pebblify/pull/61))
+
+### CI
+
+- ci(release): add `latest` tag via `docker/metadata-action` and re-push post-attestation so semver appears first in GHCR UI; both tag addition and re-push guarded by `!contains(github.ref_name, '-')` to skip pre-releases ([#67](https://github.com/Dockermint/Pebblify/pull/67))
+
+### Chore / Governance
+
+- chore(github): bootstrap `.github/ISSUE_TEMPLATE/` with 8 templates + `config.yml` (`blank_issues_enabled: false`); unblocks strict CLAUDE.md step-5 workflow enforcement ([#61](https://github.com/Dockermint/Pebblify/pull/61))
+- chore(governance): flush pending CLAUDE.md changes — workflow step renumbering, step 11 pre-push verify, step 14 PR title convention, step 17 release verification gate, step 16 CodeRabbit pre-merge panel enforcement ([#61](https://github.com/Dockermint/Pebblify/pull/61))
+- chore(lint): bootstrap `.golangci.yml` (v2 schema) with `revive.exported` at severity=error; stuttering check disabled for Feat 1 scope; gofumpt/gocritic/misspell deferred to follow-up chore PR ([#63](https://github.com/Dockermint/Pebblify/pull/63))
+
 ## [v0.4.0](https://github.com/Dockermint/Pebblify/compare/v0.3.2...v0.4.0)
 
 ### Features
