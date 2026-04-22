@@ -4,12 +4,15 @@ import (
 	"github.com/cockroachdb/pebble"
 )
 
+// Config tunes the AdaptiveBatcher commit thresholds.
 type Config struct {
 	MinBatchSize   int
 	MaxBatchSize   int
 	TargetMemoryMB int
 }
 
+// DefaultConfig returns a Config populated with the batcher defaults used
+// by the migration pipeline when no explicit tuning is supplied.
 func DefaultConfig() *Config {
 	return &Config{
 		MinBatchSize:   1_000,
@@ -18,6 +21,8 @@ func DefaultConfig() *Config {
 	}
 }
 
+// AdaptiveBatcher accumulates key/value pairs and commits them to PebbleDB
+// in bulk once either the memory budget or the entry-count ceiling is hit.
 type AdaptiveBatcher struct {
 	config       *Config
 	batch        *pebble.Batch
@@ -31,6 +36,8 @@ type AdaptiveBatcher struct {
 	onCommit     func(keys int64, bytes int64)
 }
 
+// New constructs an AdaptiveBatcher bound to db. A nil config falls back
+// to DefaultConfig.
 func New(db *pebble.DB, config *Config) *AdaptiveBatcher {
 	if config == nil {
 		config = DefaultConfig()
@@ -42,10 +49,14 @@ func New(db *pebble.DB, config *Config) *AdaptiveBatcher {
 	}
 }
 
+// SetOnCommit registers a callback invoked after each successful batch
+// commit with the number of entries and bytes that were flushed.
 func (ab *AdaptiveBatcher) SetOnCommit(fn func(keys int64, bytes int64)) {
 	ab.onCommit = fn
 }
 
+// Add copies key and value into the pending batch and triggers Commit when
+// either TargetMemoryMB or MaxBatchSize is reached.
 func (ab *AdaptiveBatcher) Add(key, value []byte) error {
 	k := make([]byte, len(key))
 	copy(k, key)
@@ -74,6 +85,9 @@ func (ab *AdaptiveBatcher) Add(key, value []byte) error {
 	return nil
 }
 
+// Commit flushes the pending batch to PebbleDB without fsync, resets the
+// in-memory accumulator, and notifies any registered OnCommit callback.
+// A commit of an empty batch is a no-op.
 func (ab *AdaptiveBatcher) Commit() error {
 	if ab.currentCount == 0 {
 		return nil
@@ -100,10 +114,15 @@ func (ab *AdaptiveBatcher) Commit() error {
 	return nil
 }
 
+// Stats returns the cumulative counters maintained by the batcher: total
+// keys written, total bytes written, and the rolling average key and value
+// sizes computed from the observed data.
 func (ab *AdaptiveBatcher) Stats() (totalKeys, totalBytes int64, avgKeySize, avgValueSize float64) {
 	return ab.totalKeys, ab.totalBytes, ab.avgKeySize, ab.avgValueSize
 }
 
+// Close releases the underlying pebble.Batch. Any pending entries are
+// discarded; callers that need to persist them must call Commit first.
 func (ab *AdaptiveBatcher) Close() error {
 	return ab.batch.Close()
 }

@@ -8,11 +8,16 @@ import (
 	"time"
 )
 
+// Server is the HTTP health probe server. It exposes /healthz/live,
+// /healthz/ready, and /healthz/startup backed by a shared ProbeState.
 type Server struct {
 	httpServer *http.Server
 	state      *ProbeState
 }
 
+// NewServer returns a Server listening on the given port and wired to the
+// supplied ProbeState. The server is not started until ListenAndServe is
+// called.
 func NewServer(port int, state *ProbeState) *Server {
 	mux := http.NewServeMux()
 	s := &Server{
@@ -34,6 +39,8 @@ func NewServer(port int, state *ProbeState) *Server {
 	return s
 }
 
+// ListenAndServe binds the configured port and blocks serving HTTP
+// requests until the server is shut down.
 func (s *Server) ListenAndServe() error {
 	ln, err := net.Listen("tcp", s.httpServer.Addr)
 	if err != nil {
@@ -42,6 +49,8 @@ func (s *Server) ListenAndServe() error {
 	return s.httpServer.Serve(ln)
 }
 
+// Shutdown gracefully stops the server, waiting for in-flight requests
+// up to the deadline carried by ctx.
 func (s *Server) Shutdown(ctx context.Context) error {
 	return s.httpServer.Shutdown(ctx)
 }

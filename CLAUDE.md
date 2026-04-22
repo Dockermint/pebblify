@@ -222,32 +222,62 @@ Every feature **MUST** follow iteration cycle. No skip. **CTO** orchestrate all 
         |                 verdict: APPROVE or BLOCK
         |                 if BLOCK -> back to step 7 with findings
         |
-[10b. PRE-PUSH VERIFY]  CTO MUST run locally before delegating to @sysadmin:
+[11. PRE-PUSH VERIFY]  CTO MUST run locally before delegating to @sysadmin:
         |  - `git status --porcelain` → 0 unstaged files in target scope
         |  - `git diff --cached` reviewed
         |  - `go build ./cmd/... ./internal/...` → 0 errors
         |  - `go vet ./...` → 0 errors
         |  - `golangci-lint run ./...` → 0 issues
         |  - If Docker/compose changed: `docker build -t test .` → success
+        |  - Confirmation of `git status --porcelain` → 0 unstaged
+        |  - Confirmation of `go build`, `go vet`, `golangci-lint` → 0 issues
+        |  - Confirmation of Docker build success (if applicable)
+        |  - Any gate failures → describe + route back to step 7
         |  If any fails, return to step 7. CTO violation = workflow failure.
-[11. COMMIT]      CTO -> @sysadmin branches from develop, stages, commits (GPG)
+[12. COMMIT]      CTO -> @sysadmin branches from develop, stages, commits (GPG)
         |                 verifies all gates passed (@qa, @lead-dev, @reviewer)
         |                 refuses to commit if any gate is unsatisfied
         |
-[12. PR]          CTO -> @sysadmin prepares PR description from template
+[13. PR]          CTO -> @sysadmin prepares PR description from template
         |                 1 PR per feature branch, no exceptions
-        |                 links to issue from step 5 (Closes #<number>)
+        |                 create single "Release Consolidation #<N>" issue + reference `Closes #<N>`
         |                 CEO opens the PR manually
         |
-[12b. ISSUE AUDIT] CTO -> @sysadmin verifies issue closure post-merge:
+[14. PR TITLE CONVENTION]
+        |                 Use Conventional Commits format for single-feature PRs:
+        |                 - Format: <type>(<scope>): <subject>
+        |                 - Types: feat, fix, docs, chore, refactor, test, perf
+        |                 - Example: "feat(converter): parallel batch processing with adaptive memory"
+        |                        
+        |                 For develop → main promotion PRs (not subject to 1 PR = 1 issue rule):
+        |                 - Format: "release: <version> — consolidates #<issue-list>"
+        |                 - Example: "release: v0.4.0 — consolidates #55, #54, #52"
+        |                 - List ALL consolidated feature PR issue numbers
+        |                        
+        |                 CodeRabbit must validate:
+        |                 - Title reflects actual changes, not merge operation
+        |                 - Title matches scope of linked issue(s)
+        |                 - If out-of-scope change present, body MUST declare it explicitly
+        |
+[15. ISSUE AUDIT] CTO -> @sysadmin verifies issue closure post-merge:
         |                 - Confirm issue #N closed automatically via `Closes #<number>` link
         |                 - If issue still open after PR merge: manually close
+        |                 - API call: `gh api repos/Dockermint/pebblify/pulls/<PR>/comments/<thread-id> \
+        |                     --input <(jq -n '.body = "Resolved: <commit-hash>"')`
+        |                 - OR: PR description comment: "CodeRabbit threads resolved by commits [list]"
+        |                 - Audit trail non-negotiable; silent closures = BLOCK verdict
         |                 - Closure comment: "Resolved via Closes #<PR_NUMBER>"
         |                 - Report closure confirmation to CTO
         |
-[13. CI]          @devops maintains the pipeline. CEO merges ONLY after:
+[16. CI]          @devops maintains the pipeline. CEO merges ONLY after:
         |                 - CI pipeline is fully green (all checks pass)
         |                 - CodeRabbit has approved (no unresolved comments)
+        |                 - CodeRabbit pre-merge check panel MUST show 0 warnings before CEO merge
+        |                 - Title check: PR title MUST reflect actual changes (not "merge X into Y")
+        |                 - Out of Scope Changes: all changes MUST be documented in linked issue(s)
+        |                   OR explicitly declared in PR body with rationale
+        |                 - If any warning present: fix root cause, commit, re-run checks
+        |                 - Warnings cannot be waived; CEO must refuse merge until checks pass
         |                 If CI fails (1st iteration):
         |                   - return to step 7 with CI error context
         |                 If CI fails (2nd+ iteration):
@@ -256,15 +286,23 @@ Every feature **MUST** follow iteration cycle. No skip. **CTO** orchestrate all 
         |                   - CTO applies recommendations, only THEN delegates @go-developer
         |                 If CodeRabbit raises issues -> fix, commit, resolve
         |
-[14. DOCS]        CTO -> @technical-writer updates documentation post-merge
+[17. RELEASE VERIFICATION] CTO MUST verify tag + artifacts before Step 14:
+        |  - `git tag -v <tag>` → GPG signature valid
+        |  - `gh attestation verify <binary>` → SLSA provenance OK
+        |  - `gh attestation verify oci://<image>` → OCI image attestation OK
+        |  - SBOM attestations present on all release assets
+        |  If any fails → diagnose root cause before Step 14
+[18. DOCS]        CTO -> @technical-writer updates documentation post-merge
         |
-[15. RETRO]       CTO -> @it-consultant verifies CLAUDE.md compliance
+[19. RETRO]       CTO -> @it-consultant verifies CLAUDE.md compliance
         |                 audits agent scope boundaries
         |                 proposes rule tightenings if gaps found
         |
-[16. MARKETING]   CTO -> @product-marketing crafts non-technical summary
-                         LinkedIn post, changelog entry, optional tweet
-                         CEO reviews and publishes
+[20. MARKETING] CTO -> @product-marketing crafts non-technical summary
+                 - LinkedIn post, changelog entry, optional tweet
+                 - CTO presents draft to CEO for review + approval
+                 - CEO approves before @product-marketing publishes
+                 - CEO review confirmation required before step completes
 ```
 
 ### Workflow Rules

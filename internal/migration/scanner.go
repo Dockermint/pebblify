@@ -14,6 +14,9 @@ import (
 	"github.com/Dockermint/Pebblify/internal/state"
 )
 
+// ScanAndPrepare inspects src, registers every .db sub-directory in st
+// with an estimated key count and size, and stages every non-database
+// entry into tmpData so it can be moved alongside the converted output.
 func ScanAndPrepare(src, tmpData string, st *state.ConversionState, verbose bool) error {
 	entries, err := os.ReadDir(src)
 	if err != nil {

@@ -10,6 +10,10 @@ import (
 	"github.com/Dockermint/Pebblify/internal/state"
 )
 
+// Monitor renders a progress bar to stderr once per second until done is
+// closed. It reads the live ConversionState under the state package lock
+// and overlays a rolling throughput and ETA sourced from m. The call
+// returns immediately with no output when totalKeys is zero.
 func Monitor(st *state.ConversionState, totalKeys int64, startedAt time.Time, m *metrics.Metrics, done <-chan struct{}) {
 	if totalKeys == 0 {
 		return

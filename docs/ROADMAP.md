@@ -1,7 +1,7 @@
 # Pebblify Roadmap
 
 Owner: `@software-architect`
-Last updated: 2026-04-18
+Last updated: 2026-04-22
 
 ---
 
@@ -38,6 +38,46 @@ Feature branches (1 PR = 1 feature = 1 issue):
 | `feat/daemon-mode`           | `docs/specs/daemon-mode.md`                       | `@go-developer`, `@lead-dev`, `@container-engineer` |
 | `feat/podman-support`        | `docs/specs/podman-support.md`                    | `@lead-dev`, `@container-engineer`      |
 | `docs/release-v0.4.0`        | `docs/specs/documentation-refresh.md`             | `@technical-writer`                     |
+
+---
+
+## v0.4.1 — Next Patch
+
+Target: patch bump — documentation and polish only, no behavior changes.
+
+### In progress / next patch
+
+1. **Godoc coverage on exported identifiers**
+   - **Status**: in-progress
+   - **Spec**: `docs/specs/godoc-coverage.md`
+   - **Owner**: `@go-developer` (impl), `@qa` (regression), `@reviewer` (audit)
+   - **Description**: document every exported (PascalCase) identifier across
+     `cmd/**/*.go` and `internal/**/*.go`, and add `// Package <name> ...`
+     sentences to the 12 packages currently missing one. Pure doc change.
+   - **Target**: v0.4.1
+
+2. **Documentation freshness fixes**
+   - **Status**: in-progress
+   - **Spec**: `docs/specs/docs-freshness-v0.4.1.md`
+   - **Owner**: `@technical-writer` (edits), `@sysadmin` (git mv if license rename approved)
+   - **Description**: fix stale `v0.5.0` image tag in
+     `docs/docusaurus/install-podman.mdx:149`, resolve `README.md:211`
+     `LICENSE`/`LICENCE` mismatch, optionally add minimal `CONTRIBUTING.md`
+     stub. Decisions pending CEO (license rename; CONTRIBUTING stub).
+   - **Target**: v0.4.1
+
+3. **GHCR package page display fixes**
+   - **Status**: spec drafted, pending CEO confirmation
+   - **Spec**: `docs/specs/ghcr-package-display-fix.md`
+   - **Owner**: `@devops` (workflow), `@container-engineer` (Dockerfile) — dual-owner, single PR
+   - **Description**: GHCR package page lists `sha256-...` attestation tag
+     ahead of semver and shows "No description provided". Root causes:
+     Sigstore attestation re-push ordering, and case-mismatched
+     `org.opencontainers.image.source` label breaking repo→package linkage.
+     Fix scope: `.github/workflows/release.yml` (re-push `latest` after
+     attestation) + `Dockerfile` (remove duplicated `source` LABEL line).
+     Validation on `v0.4.1-rc1` canary before final.
+   - **Target**: v0.4.1
 
 ---
 

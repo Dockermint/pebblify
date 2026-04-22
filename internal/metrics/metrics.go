@@ -9,6 +9,8 @@ import (
 	"github.com/Dockermint/Pebblify/internal/fsutil"
 )
 
+// DBMetricsData is the per-database counters and derived statistics
+// collected during a conversion run.
 type DBMetricsData struct {
 	Name          string
 	KeysProcessed int64
@@ -29,6 +31,9 @@ type throughputSample struct {
 	bytes     int64
 }
 
+// Metrics aggregates global and per-database conversion counters together
+// with a rolling 30-second throughput window. It is safe for concurrent
+// use.
 type Metrics struct {
 	mu                 sync.RWMutex
 	TotalKeysProcessed int64
@@ -40,6 +45,8 @@ type Metrics struct {
 	recentSamples      []throughputSample
 }
 
+// New returns a zeroed Metrics ready for use. The StartTime and LastUpdate
+// fields are primed to the current wall clock time.
 func New() *Metrics {
 	return &Metrics{
 		DBMetrics:     make(map[string]*DBMetricsData),
@@ -49,6 +56,9 @@ func New() *Metrics {
 	}
 }
 
+// RecordKeys increments the global and per-database counters for dbName
+// and appends a new sample into the rolling throughput window. Samples
+// older than 30 seconds are evicted on every call.
 func (m *Metrics) RecordKeys(dbName string, keys int64, bytesRead, bytesWritten int64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -83,6 +93,9 @@ func (m *Metrics) RecordKeys(dbName string, keys int64, bytesRead, bytesWritten 
 	dbm.BytesWritten += bytesWritten
 }
 
+// FinalizeDB closes out the per-database counters for dbName, setting the
+// end time, duration, and average key and value sizes, and deriving the
+// throughput figures reported in the final summary.
 func (m *Metrics) FinalizeDB(dbName string, avgKeySize, avgValueSize float64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -100,6 +113,9 @@ func (m *Metrics) FinalizeDB(dbName string, avgKeySize, avgValueSize float64) {
 	}
 }
 
+// GetCurrentThroughput returns the current keys-per-second and
+// megabytes-per-second figures computed from the rolling sample window.
+// It returns zeroes when fewer than two samples are available.
 func (m *Metrics) GetCurrentThroughput() (keysPerSec float64, mbPerSec float64) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -126,6 +142,8 @@ func (m *Metrics) GetCurrentThroughput() (keysPerSec float64, mbPerSec float64) 
 	return keysPerSec, mbPerSec
 }
 
+// PrintSummary writes the human-readable metrics summary (global totals,
+// throughput, and per-database breakdown) to stdout.
 func (m *Metrics) PrintSummary() {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

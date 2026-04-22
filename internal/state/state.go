@@ -10,13 +10,24 @@ import (
 	"time"
 )
 
+// On-disk layout constants shared by the migration pipeline.
 const (
-	TmpDirName    = ".pebblify-tmp"
+	// TmpDirName is the name of the temporary directory pebblify creates
+	// under the configured base directory to stage converted output.
+	TmpDirName = ".pebblify-tmp"
+	// StateFileName is the filename used for the JSON-encoded conversion
+	// state inside TmpDirName.
 	StateFileName = "state.json"
-	LockFileName  = "pebblify.lock"
-	StateVersion  = 0
+	// LockFileName is the filename of the exclusive lock file pebblify
+	// creates inside the temp root to prevent concurrent runs.
+	LockFileName = "pebblify.lock"
+	// StateVersion is the current schema version embedded in every state
+	// document written by pebblify.
+	StateVersion = 0
 )
 
+// DBStatus captures the conversion progress of a single .db sub-directory
+// and is persisted as part of the ConversionState JSON document.
 type DBStatus struct {
 	Name                 string    `json:"name"`
 	SourcePath           string    `json:"source_path"`
@@ -33,6 +44,8 @@ type DBStatus struct {
 	KeysPerSecond        float64   `json:"keys_per_second,omitempty"`
 }
 
+// GetLastCheckpointKey decodes and returns the last checkpoint key for d,
+// or nil if no checkpoint has been recorded yet.
 func (d *DBStatus) GetLastCheckpointKey() []byte {
 	if d.LastCheckpointKeyB64 == "" {
 		return nil
@@ -44,6 +57,8 @@ func (d *DBStatus) GetLastCheckpointKey() []byte {
 	return data
 }
 
+// SetLastCheckpointKey base64-encodes key into the persisted field. A nil
+// key clears the stored checkpoint.
 func (d *DBStatus) SetLastCheckpointKey(key []byte) {
 	if key == nil {
 		d.LastCheckpointKeyB64 = ""
@@ -52,6 +67,8 @@ func (d *DBStatus) SetLastCheckpointKey(key []byte) {
 	}
 }
 
+// ConversionState is the top-level persisted document that tracks an
+// in-flight or recovered conversion run.
 type ConversionState struct {
 	Version            int                  `json:"version"`
 	Src                string               `json:"src"`
@@ -65,6 +82,9 @@ type ConversionState struct {
 
 var mu sync.Mutex
 
+// Update applies update under the package-level mutex, stamps the
+// LastUpdated field, and atomically writes the document to statePath. A
+// nil update function is accepted and simply persists the current state.
 func Update(statePath string, state *ConversionState, update func()) error {
 	mu.Lock()
 	defer mu.Unlock()
@@ -76,10 +96,13 @@ func Update(statePath string, state *ConversionState, update func()) error {
 	return writeAtomic(statePath, state)
 }
 
+// Lock acquires the package-level state mutex so external callers (such
+// as the progress renderer) can read ConversionState consistently.
 func Lock() {
 	mu.Lock()
 }
 
+// Unlock releases the package-level state mutex acquired by Lock.
 func Unlock() {
 	mu.Unlock()
 }
@@ -112,6 +135,7 @@ func writeAtomic(path string, state *ConversionState) error {
 	return os.Rename(tmpPath, path)
 }
 
+// Read decodes the JSON-encoded ConversionState stored at path.
 func Read(path string) (*ConversionState, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -127,6 +151,9 @@ func Read(path string) (*ConversionState, error) {
 	return &s, nil
 }
 
+// AcquireLock creates the on-disk lock file inside tmpRoot and returns a
+// release closure. It fails if the lock file already exists, signalling a
+// concurrent pebblify run or a stale file left by a crashed process.
 func AcquireLock(tmpRoot string) (func(), error) {
 	lockPath := filepath.Join(tmpRoot, LockFileName)
 
@@ -148,6 +175,8 @@ func AcquireLock(tmpRoot string) (func(), error) {
 	return unlock, nil
 }
 
+// CollectPendingDBs returns every DBStatus in s whose status is not
+// "done". The result preserves the order yielded by map iteration.
 func CollectPendingDBs(s *ConversionState) []*DBStatus {
 	var res []*DBStatus
 	for _, db := range s.DBs {
@@ -158,6 +187,8 @@ func CollectPendingDBs(s *ConversionState) []*DBStatus {
 	return res
 }
 
+// CalculateTotalMigrated returns the sum of MigratedKeys across every
+// DBStatus in s.
 func CalculateTotalMigrated(s *ConversionState) int64 {
 	var total int64
 	for _, db := range s.DBs {

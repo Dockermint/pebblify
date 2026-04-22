@@ -1,4 +1,3 @@
-Looking at the content, I'll compress natural language prose while leaving code blocks, headings, tables, and technical content intact.
 ---
 name: sysadmin
 description: >

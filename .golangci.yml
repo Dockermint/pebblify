@@ -1,0 +1,45 @@
+# golangci-lint config — bootstrap scope (Pebblify v0.4.1 Feat 1).
+# Focused on godoc-comment enforcement via revive.exported.
+# Additional linters (gofumpt, gocritic, misspell, revive stutter) will be
+# enabled in a dedicated follow-up chore PR post-v0.4.1 once the codebase
+# is cleaned in a separate pass.
+version: "2"
+
+run:
+  timeout: 5m
+  go: "1.25"
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - revive
+
+  settings:
+    revive:
+      severity: error
+      rules:
+        - name: exported
+          severity: error
+          arguments:
+            - "disableStutteringCheck"
+        - name: var-naming
+        - name: package-comments
+        - name: indent-error-flow
+        - name: errorf
+
+  exclusions:
+    rules:
+      - path: "_test\\.go"
+        linters:
+          - revive
+        text: "exported"
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  new: false
