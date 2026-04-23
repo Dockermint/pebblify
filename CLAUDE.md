@@ -243,7 +243,28 @@ Every feature **MUST** follow iteration cycle. No skip. **CTO** orchestrate all 
         |                 create single "Release Consolidation #<N>" issue + reference `Closes #<N>`
         |                 CEO opens the PR manually
         |
-[14. PR TITLE CONVENTION]
+[14. HYPOTHESIS CHECK (CI / EXTERNAL DEPS)]
+        |                 For CI or release-workflow changes that depend on
+        |                 undocumented third-party service behavior (e.g.,
+        |                 GHCR sort key, registry tag indexing, external
+        |                 webhook semantics, container registry UX), PR body
+        |                 MUST declare:
+        |                 - Root assumption: explicit statement of the
+        |                   external behavior the fix depends on
+        |                 - Pre-merge validation: syntax/lint gates satisfied
+        |                   (actionlint, yamllint, hadolint, etc.)
+        |                 - Post-merge validation plan: CEO-visible checklist
+        |                   describing the observable outcome to confirm the
+        |                   hypothesis holds in production
+        |                 - Rollback contingency: explicit fallback or
+        |                   escalation path if post-merge validation fails
+        |                   (OR declare "no rollback needed, backwards
+        |                   compatible" with rationale)
+        |                 @sysadmin MUST refuse to prepare PR if any clause
+        |                 missing. @it-consultant audits retro-compliance in
+        |                 step 20.
+        |
+[15. PR TITLE CONVENTION]
         |                 Use Conventional Commits format for single-feature PRs:
         |                 - Format: <type>(<scope>): <subject>
         |                 - Types: feat, fix, docs, chore, refactor, test, perf
@@ -259,7 +280,7 @@ Every feature **MUST** follow iteration cycle. No skip. **CTO** orchestrate all 
         |                 - Title matches scope of linked issue(s)
         |                 - If out-of-scope change present, body MUST declare it explicitly
         |
-[15. ISSUE AUDIT] CTO -> @sysadmin verifies issue closure post-merge:
+[16. ISSUE AUDIT] CTO -> @sysadmin verifies issue closure post-merge:
         |                 - Confirm issue #N closed automatically via `Closes #<number>` link
         |                 - If issue still open after PR merge: manually close
         |                 - API call: `gh api repos/Dockermint/pebblify/pulls/<PR>/comments/<thread-id> \
@@ -269,7 +290,7 @@ Every feature **MUST** follow iteration cycle. No skip. **CTO** orchestrate all 
         |                 - Closure comment: "Resolved via Closes #<PR_NUMBER>"
         |                 - Report closure confirmation to CTO
         |
-[16. CI]          @devops maintains the pipeline. CEO merges ONLY after:
+[17. CI]          @devops maintains the pipeline. CEO merges ONLY after:
         |                 - CI pipeline is fully green (all checks pass)
         |                 - CodeRabbit has approved (no unresolved comments)
         |                 - CodeRabbit pre-merge check panel MUST show 0 warnings before CEO merge
@@ -286,19 +307,20 @@ Every feature **MUST** follow iteration cycle. No skip. **CTO** orchestrate all 
         |                   - CTO applies recommendations, only THEN delegates @go-developer
         |                 If CodeRabbit raises issues -> fix, commit, resolve
         |
-[17. RELEASE VERIFICATION] CTO MUST verify tag + artifacts before Step 14:
+[18. RELEASE VERIFICATION] CTO MUST verify tag + artifacts before Step 19:
         |  - `git tag -v <tag>` → GPG signature valid
         |  - `gh attestation verify <binary>` → SLSA provenance OK
         |  - `gh attestation verify oci://<image>` → OCI image attestation OK
         |  - SBOM attestations present on all release assets
-        |  If any fails → diagnose root cause before Step 14
-[18. DOCS]        CTO -> @technical-writer updates documentation post-merge
+        |  If any fails → diagnose root cause before Step 19
+[19. DOCS]        CTO -> @technical-writer updates documentation post-merge
         |
-[19. RETRO]       CTO -> @it-consultant verifies CLAUDE.md compliance
+[20. RETRO]       CTO -> @it-consultant verifies CLAUDE.md compliance
         |                 audits agent scope boundaries
         |                 proposes rule tightenings if gaps found
+        |                 audits step 14 HYPOTHESIS CHECK clauses when applicable
         |
-[20. MARKETING] CTO -> @product-marketing crafts non-technical summary
+[21. MARKETING] CTO -> @product-marketing crafts non-technical summary
                  - LinkedIn post, changelog entry, optional tweet
                  - CTO presents draft to CEO for review + approval
                  - CEO approves before @product-marketing publishes
