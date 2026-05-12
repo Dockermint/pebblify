@@ -1,5 +1,22 @@
 # Changelog
 
+## [v0.4.2](https://github.com/Dockermint/Pebblify/compare/v0.4.1...v0.4.2)
+
+### Bug Fixes
+
+- fix(docker): bump tzdata Alpine pin from 2026a-r0 to 2026b-r0 to fix tzdata expiry ([#85](https://github.com/Dockermint/Pebblify/pull/85))
+- fix(ci): promote all image tags after attestation so semver and `latest` tags appear before sha256 digest in GHCR UI; replaces v0.4.1 single-tag re-tag with loop over all `steps.meta.outputs.tags` ([#75](https://github.com/Dockermint/Pebblify/pull/75))
+
+### Dependencies
+
+- deps(deps): bump github.com/klauspost/compress from 1.18.5 to 1.18.6 ([#81](https://github.com/Dockermint/Pebblify/pull/81))
+- deps(deps): bump github.com/aws/aws-sdk-go-v2/service/s3 from 1.99.1 to 1.101.0 ([#79](https://github.com/Dockermint/Pebblify/pull/79))
+- deps(deps): bump github.com/aws/aws-sdk-go-v2/config from 1.32.16 to 1.32.17 ([#83](https://github.com/Dockermint/Pebblify/pull/83))
+
+### Chore / Governance
+
+- chore(claude-md): add Step 14 HYPOTHESIS CHECK to CLAUDE.md workflow for CI / external-deps fixes; renumber steps 14-21 and update Step 20 RETRO to audit Step 14 clauses ([#77](https://github.com/Dockermint/Pebblify/pull/77))
+
 ## [v0.4.1](https://github.com/Dockermint/Pebblify/compare/v0.4.0...v0.4.1)
 
 ### Bug Fixes
