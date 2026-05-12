@@ -156,12 +156,16 @@ jobs:
           subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true
 
-      - name: Re-tag latest after attestation (surface semver first in GHCR UI)
-        if: ${{ !contains(github.ref_name, '-') }}
+      - name: Promote image tags after attestation (surface real tags in GHCR UI)
         run: |
-          docker buildx imagetools create \
-            --tag ghcr.io/${{ steps.repo.outputs.name }}:latest \
-            ghcr.io/${{ steps.repo.outputs.name }}@${{ steps.push.outputs.digest }}
+          set -euo pipefail
+          DIGEST="${{ steps.push.outputs.digest }}"
+          REPO="ghcr.io/${{ steps.repo.outputs.name }}"
+          while IFS= read -r tag; do
+            [ -z "$tag" ] && continue
+            echo "Promoting tag: $tag"
+            docker buildx imagetools create --tag "$tag" "${REPO}@${DIGEST}"
+          done <<< "${{ steps.meta.outputs.tags }}"
 
   release:
     name: GitHub Release
