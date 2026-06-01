@@ -1,5 +1,15 @@
 # Changelog
 
+## [v0.4.3](https://github.com/Dockermint/Pebblify/compare/v0.4.2...v0.4.3)
+
+### Dependencies
+
+- deps(deps): bump golang.org/x/crypto from 0.50.0 to 0.52.0 ([#89](https://github.com/Dockermint/Pebblify/pull/89))
+- deps(deps): bump github.com/aws/aws-sdk-go-v2/config from 1.32.17 to 1.32.20 ([#92](https://github.com/Dockermint/Pebblify/pull/92))
+- deps(deps): bump github.com/aws/aws-sdk-go-v2 from 1.41.7 to 1.41.9 (landed transitively via [#92](https://github.com/Dockermint/Pebblify/pull/92))
+- deps(deps): bump github.com/aws/aws-sdk-go-v2/service/s3 from 1.101.0 to 1.102.2 ([#94](https://github.com/Dockermint/Pebblify/pull/94))
+- deps(deps): bump github.com/aws/aws-sdk-go-v2/credentials from 1.19.16 to 1.19.19 (landed transitively via [#92](https://github.com/Dockermint/Pebblify/pull/92))
+
 ## [v0.4.2](https://github.com/Dockermint/Pebblify/compare/v0.4.1...v0.4.2)
 
 ### Bug Fixes
