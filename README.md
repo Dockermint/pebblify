@@ -84,28 +84,28 @@ Real-world comparison on a production Cosmos node snapshot:
 
 ```bash
 # Pull the image
-docker pull ghcr.io/dockermint/pebblify:0.4.0
-podman pull ghcr.io/dockermint/pebblify:0.4.0
+docker pull ghcr.io/dockermint/pebblify:0.4.3
+podman pull ghcr.io/dockermint/pebblify:0.4.3
 
 # Run a conversion
 docker run --rm \
   -v /path/to/source:/data/source:ro \
   -v /path/to/output:/data/output \
   -v /path/to/tmp:/tmp \
-  ghcr.io/dockermint/pebblify:0.4.0 \
+  ghcr.io/dockermint/pebblify:0.4.3 \
   level-to-pebble --health --metrics /data/source /data/output
 
 podman run --rm \
   -v /path/to/source:/data/source:ro \
   -v /path/to/output:/data/output \
   -v /path/to/tmp:/tmp \
-  ghcr.io/dockermint/pebblify:0.4.0 \
+  ghcr.io/dockermint/pebblify:0.4.3 \
   level-to-pebble --health --metrics /data/source /data/output
 ```
 
 ### Binary
 
-Download a pre-built binary for your platform from the [v0.4.0 release page](https://github.com/Dockermint/pebblify/releases/tag/v0.4.0).
+Download a pre-built binary for your platform from the [v0.4.3 release page](https://github.com/Dockermint/pebblify/releases/tag/v0.4.3).
 
 Available architectures: Linux/AMD64, Linux/ARM64, Darwin/ARM64, Darwin/AMD64.
 
@@ -123,7 +123,7 @@ After downloading, verify the checksum against the `checksums.txt` file on the r
 > - `install-podman` -- install the daemon as a rootless Podman Quadlet (Linux only)
 
 ```bash
-git clone --branch v0.4.0 https://github.com/Dockermint/pebblify.git
+git clone --branch v0.4.3 https://github.com/Dockermint/pebblify.git
 cd pebblify
 make install-cli
 ```
