@@ -10,7 +10,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.102.2
 	github.com/cockroachdb/pebble v1.1.5
 	github.com/klauspost/compress v1.18.6
-	github.com/pierrec/lz4/v4 v4.1.26
+	github.com/pierrec/lz4/v4 v4.1.27
 	github.com/prometheus/client_golang v1.23.2
 	github.com/syndtr/goleveldb v1.0.0
 	golang.org/x/crypto v0.52.0
